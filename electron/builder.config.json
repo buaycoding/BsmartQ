@@ -1,0 +1,48 @@
+{
+  "appId": "com.bsmartq.desktop",
+  "productName": "BsmartQ Desktop",
+  "artifactName": "${productName}-${version}-${os}.${ext}",
+  "directories": {
+    "output": "dist",
+    "buildResources": "public/images"
+  },
+  "files": [
+    "app.js",
+    "package.json",
+    "routes/**/*",
+    "views/**/*",
+    "public/**/*",
+    "data/**/*",
+    "electron/**/*",
+    "node_modules/**/*"
+  ],
+  "win": {
+    "target": [
+      "nsis",
+      "portable"
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "BsmartQ Desktop"
+  },
+  "mac": {
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "icon": "public/images/icon.icns",
+    "category": "public.app-category.business"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "icon": "public/images/icon.png",
+    "category": "Office"
+  }
+}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<%- include('partials/head', { title: 'BsmartQ | Touch Kiosk' }) %>
+<body class="flex flex-col min-h-full font-sans antialiased">
+  <%- include('partials/navbar') %>
+  <section class="py-16">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+        <div class="space-y-5">
+          <div class="inline-flex items-center space-x-2 bg-slate-800/80 px-3 py-1 rounded-full text-xs font-semibold text-brand-500 border border-slate-700">
+            <i class="fa-solid fa-ticket"></i>
+            <span>Touch Kiosk Intake</span>
+          </div>
+          <h1 class="text-4xl font-extrabold text-white">Issue a queue ticket</h1>
+          <p class="text-slate-400">This flow is the live customer intake entry point for the queue system. It creates a real ticket request and pushes it into the board feed.</p>
+          <% if (ticketPreview) { %>
+            <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-emerald-300">
+              <p class="text-xs uppercase tracking-wide">Issued Ticket</p>
+              <p class="text-3xl font-black mt-2"><%= ticketPreview.ticket %></p>
+              <p class="text-sm mt-1">Service type: <%= ticketPreview.serviceType %></p>
+            </div>
+          <% } %>
+          <% if (error) { %>
+            <div class="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"><%= error %></div>
+          <% } %>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+          <form action="/tickets/issue" method="POST" class="space-y-4">
+            <div>
+              <label class="block text-sm text-slate-300 mb-2">Service type</label>
+              <select name="serviceType" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:outline-none focus:border-brand-500">
+                <option value="General">General Service</option>
+                <option value="Priority">Priority / VIP</option>
+                <option value="Support">Support Desk</option>
+                <option value="Payment">Payment / Banking</option>
+              </select>
+            </div>
+            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold px-4 py-3 rounded-lg transition">Generate Ticket</button>
+          </form>
+          <div class="mt-5 text-sm text-slate-400">
+            <a href="/queue/board" class="text-brand-500 hover:text-brand-400">Open live queue board</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <%- include('partials/footer') %>
+</body>
+</html>

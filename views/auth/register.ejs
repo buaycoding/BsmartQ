@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<%- include('../partials/head', { title: 'BsmartQ | Create Account' }) %>
+<body class="flex flex-col min-h-full font-sans antialiased">
+  <%- include('../partials/navbar') %>
+  <section class="py-16">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+        <div class="space-y-5">
+          <div class="inline-flex items-center space-x-2 bg-slate-800/80 px-3 py-1 rounded-full text-xs font-semibold text-brand-500 border border-slate-700">
+            <i class="fa-solid fa-user-plus"></i>
+            <span>Workspace Setup</span>
+          </div>
+          <h1 class="text-4xl font-extrabold text-white">Create a new BsmartQ account</h1>
+          <p class="text-slate-400">Start a staff profile and access branch queue tools in seconds.</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+          <% if (error) { %>
+            <div class="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"><%= error %></div>
+          <% } %>
+          <form action="/register" method="POST" class="space-y-4">
+            <div>
+              <label class="block text-sm text-slate-300 mb-2">Full name</label>
+              <input type="text" name="name" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:outline-none focus:border-brand-500" required>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-300 mb-2">Organization name</label>
+              <input type="text" name="organizationName" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:outline-none focus:border-brand-500" placeholder="Acme Company" required>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-300 mb-2">Email address</label>
+              <input type="email" name="email" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:outline-none focus:border-brand-500" required>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-300 mb-2">Password</label>
+              <input type="password" name="password" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:outline-none focus:border-brand-500" required>
+            </div>
+            <div>
+              <label class="block text-sm text-slate-300 mb-2">Confirm password</label>
+              <input type="password" name="confirmPassword" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:outline-none focus:border-brand-500" required>
+            </div>
+            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold px-4 py-3 rounded-lg transition">Create Account</button>
+          </form>
+          <div class="mt-5 text-sm text-slate-400">
+            Already registered?
+            <a href="/login" class="text-brand-500 hover:text-brand-400">Sign in</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <%- include('../partials/footer') %>
+</body>
+</html>

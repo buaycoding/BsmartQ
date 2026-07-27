@@ -1,0 +1,48 @@
+{
+  "name": "bsmartq",
+  "version": "1.0.0",
+  "description": "BsmartQ is an offline-first, AI-powered Windows desktop queue management system with local encrypted storage, cloud synchronization, and intelligent forecasting for enterprise operations.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node app.js",
+    "desktop": "electron .",
+    "desktop:dev": "concurrently \"npm run start\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev": "node app.js",
+    "build:desktop": "electron-builder --config electron/builder.config.json",
+    "build:win": "electron-builder --win --config electron/builder.config.json",
+    "build:mac": "electron-builder --mac --config electron/builder.config.json",
+    "build:linux": "electron-builder --linux --config electron/builder.config.json",
+    "build:all": "electron-builder --win --mac --linux --config electron/builder.config.json"
+  },
+  "keywords": [
+    "queue-management",
+    "offline-first",
+    "desktop-app",
+    "ai",
+    "windows",
+    "enterprise"
+  ],
+  "author": "BsmartQ",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "electron-is-dev": "^2.0.0",
+    "express": "^4.21.0",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "pg": "^8.12.1"
+  },
+  "devDependencies": {
+    "concurrently": "8.2.2",
+    "electron": "31.0.2",
+    "electron-builder": "26.15.3",
+    "wait-on": "7.2.0"
+  },
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
+  }
+}

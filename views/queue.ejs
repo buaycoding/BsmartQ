@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<%- include('partials/head', { title: 'BsmartQ | Queue Board' }) %>
+<body class="flex flex-col min-h-full font-sans antialiased">
+  <%- include('partials/navbar') %>
+  <section class="py-16">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="mb-8">
+        <div class="inline-flex items-center space-x-2 bg-slate-800/80 px-3 py-1 rounded-full text-xs font-semibold text-brand-500 border border-slate-700">
+          <i class="fa-solid fa-clipboard-list"></i>
+          <span>Queue Operations Board</span>
+        </div>
+        <h1 class="mt-4 text-4xl font-extrabold text-white">Live queue orchestration</h1>
+        <p class="text-slate-400 mt-2">Monitor queue movement, service allocation, and active counters in one board.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <p class="text-xs text-slate-500 uppercase mb-2">Waiting</p>
+          <p class="text-3xl font-bold text-white"><%= queueStats.waitingCount %></p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <p class="text-xs text-slate-500 uppercase mb-2">Serving Now</p>
+          <p class="text-3xl font-bold text-emerald-400"><%= queueStats.servingNow %></p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <p class="text-xs text-slate-500 uppercase mb-2">Avg Service</p>
+          <p class="text-3xl font-bold text-amber-400"><%= queueStats.avgServiceTime %> min</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <p class="text-xs text-slate-500 uppercase mb-2">Completed Today</p>
+          <p class="text-3xl font-bold text-sky-400"><%= queueStats.completedToday %></p>
+        </div>
+      </div>
+
+      <% if (statusMessage) { %>
+        <div class="mb-6 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-300">
+          <%= statusMessage %>
+        </div>
+      <% } %>
+
+      <div class="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-sm text-slate-300">
+        <span class="font-semibold text-white">Audio alerts</span>
+        <span class="text-slate-400">A tone and spoken announcement play when a ticket is called.</span>
+        <button type="button" id="enableAudioBtn" class="rounded-lg border border-brand-500/40 bg-brand-600/20 px-3 py-2 text-sm font-semibold text-brand-300">Enable sound</button>
+        <button type="button" id="autoCallToggleBtn" class="rounded-lg border border-emerald-500/40 bg-emerald-600/20 px-3 py-2 text-sm font-semibold text-emerald-300">Start auto call</button>
+        <button type="button" id="stopAutoCallBtn" class="rounded-lg border border-amber-500/40 bg-amber-600/20 px-3 py-2 text-sm font-semibold text-amber-300">Stop auto call</button>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800">
+          <h2 class="text-lg font-bold text-white">Active Queue Feed</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-left text-sm text-slate-300">
+            <thead class="bg-slate-950 text-slate-400">
+              <tr>
+                <th class="px-6 py-3 font-semibold">Ticket</th>
+                <th class="px-6 py-3 font-semibold">Status</th>
+                <th class="px-6 py-3 font-semibold">Assigned Counter</th>
+                <th class="px-6 py-3 font-semibold">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% queueItems.forEach((item) => { %>
+                <tr class="border-t border-slate-800">
+                  <td class="px-6 py-4 text-white font-semibold"><%= item.ticket %></td>
+                  <td class="px-6 py-4">
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-200">
+                      <%= item.status %>
+                    </span>
+                  </td>
+                  <td class="px-6 py-4"><%= item.counter %></td>
+                  <td class="px-6 py-4">
+                    <form action="/queue/action" method="POST" class="flex flex-wrap gap-2">
+                      <input type="hidden" name="ticket" value="<%= item.ticket %>">
+                      <button type="submit" name="action" value="serve" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-md text-xs font-semibold">Serve</button>
+                      <button type="submit" name="action" value="complete" class="bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded-md text-xs font-semibold">Complete</button>
+                      <button type="submit" name="action" value="requeue" class="bg-amber-600 hover:bg-amber-500 px-3 py-2 rounded-md text-xs font-semibold">Requeue</button>
+                    </form>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+  <%- include('partials/footer') %>
+  <script>
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const autoCallToggleBtn = document.getElementById('autoCallToggleBtn');
+    const stopAutoCallBtn = document.getElementById('stopAutoCallBtn');
+    let audioEnabled = false;
+    let autoCallActive = false;
+    let autoCallTimer = null;
+
+    function ensureAudio() {
+      if (audioEnabled) return true;
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return false;
+      const context = new AudioContextCtor();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 880;
+      gain.gain.value = 0.0001;
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.35);
+      oscillator.stop(context.currentTime + 0.4);
+      context.close();
+      audioEnabled = true;
+      if (enableAudioBtn) enableAudioBtn.textContent = 'Sound enabled';
+      return true;
+    }
+
+    function playQueueNotification(ticket) {
+      if (!ensureAudio()) return;
+      const announcement = `Queue ticket ${ticket} please proceed to the counter.`;
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(announcement);
+        utterance.lang = 'en-US';
+        utterance.rate = 1;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+
+    function stopAutoCall() {
+      autoCallActive = false;
+      if (autoCallTimer) {
+        clearTimeout(autoCallTimer);
+        autoCallTimer = null;
+      }
+      if (autoCallToggleBtn) autoCallToggleBtn.textContent = 'Start auto call';
+      if (autoCallToggleBtn) autoCallToggleBtn.className = 'rounded-lg border border-emerald-500/40 bg-emerald-600/20 px-3 py-2 text-sm font-semibold text-emerald-300';
+      if (stopAutoCallBtn) stopAutoCallBtn.className = 'rounded-lg border border-amber-500/40 bg-amber-600/20 px-3 py-2 text-sm font-semibold text-amber-300';
+    }
+
+    function startAutoCall() {
+      autoCallActive = true;
+      if (autoCallToggleBtn) {
+        autoCallToggleBtn.textContent = 'Auto call running';
+        autoCallToggleBtn.className = 'rounded-lg border border-emerald-500/40 bg-emerald-500/40 px-3 py-2 text-sm font-semibold text-emerald-100';
+      }
+      if (stopAutoCallBtn) {
+        stopAutoCallBtn.className = 'rounded-lg border border-amber-500/40 bg-amber-500/40 px-3 py-2 text-sm font-semibold text-amber-100';
+      }
+
+      const forms = Array.from(document.querySelectorAll('form[action="/queue/action"]'));
+      const nextWaitingForm = forms.find((form) => {
+        const ticketInput = form.querySelector('input[name="ticket"]');
+        const actionBtn = form.querySelector('button[name="action"][value="serve"]');
+        return ticketInput && actionBtn;
+      });
+
+      if (!nextWaitingForm) {
+        stopAutoCall();
+        return;
+      }
+
+      const ticketInput = nextWaitingForm.querySelector('input[name="ticket"]');
+      const serveBtn = nextWaitingForm.querySelector('button[name="action"][value="serve"]');
+      if (!ticketInput || !serveBtn) {
+        stopAutoCall();
+        return;
+      }
+
+      playQueueNotification(ticketInput.value);
+      serveBtn.click();
+
+      if (autoCallActive) {
+        autoCallTimer = setTimeout(() => {
+          if (!autoCallActive) return;
+          const nextForms = Array.from(document.querySelectorAll('form[action="/queue/action"]'));
+          const nextForm = nextForms.find((form) => {
+            const currentTicket = form.querySelector('input[name="ticket"]');
+            const currentAction = form.querySelector('button[name="action"][value="serve"]');
+            return currentTicket && currentAction;
+          });
+          if (nextForm) {
+            const nextTicket = nextForm.querySelector('input[name="ticket"]');
+            const nextServeBtn = nextForm.querySelector('button[name="action"][value="serve"]');
+            if (nextTicket && nextServeBtn) {
+              playQueueNotification(nextTicket.value);
+              nextServeBtn.click();
+            }
+          }
+        }, 5000);
+      }
+    }
+
+    if (enableAudioBtn) {
+      enableAudioBtn.addEventListener('click', () => ensureAudio());
+    }
+
+    if (autoCallToggleBtn) {
+      autoCallToggleBtn.addEventListener('click', () => {
+        if (autoCallActive) {
+          stopAutoCall();
+          return;
+        }
+        startAutoCall();
+      });
+    }
+
+    if (stopAutoCallBtn) {
+      stopAutoCallBtn.addEventListener('click', () => stopAutoCall());
+    }
+
+    document.querySelectorAll('form[action="/queue/action"]').forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        const actionInput = form.querySelector('button[type="submit"]:focus') || form.querySelector('button[name="action"]');
+        const action = actionInput ? actionInput.value : '';
+        const ticketInput = form.querySelector('input[name="ticket"]');
+        const ticket = ticketInput ? ticketInput.value : '';
+        if (action === 'serve' && ticket) {
+          playQueueNotification(ticket);
+        }
+        if (action === 'complete' || action === 'requeue') {
+          stopAutoCall();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

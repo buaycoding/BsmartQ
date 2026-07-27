@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: bsmartq
+    env: node
+    plan: standard
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: bsmartq-db
+          property: host
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        fromDatabase:
+          name: bsmartq-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: bsmartq-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: bsmartq-db
+          property: password
+      - key: PORT
+        value: "3000"
+      - key: IS_OFFLINE_MODE
+        value: "false"
+      - key: TENANT_ID
+        value: tenant-default-001
+      - key: BRANCH_NAME
+        value: Main Downtown Branch
+      - key: JWT_SECRET
+        sync: false
+
+databases:
+  - name: bsmartq-db
+    plan: standard
+    postgresVersion: "15"

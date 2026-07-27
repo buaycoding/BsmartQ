@@ -1,0 +1,24 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="256" height="256" fill="#0c4a6e"/>
+  
+  <!-- Outer circle -->
+  <circle cx="128" cy="128" r="120" fill="#0284c7"/>
+  
+  <!-- Queue bars -->
+  <g fill="#ffffff">
+    <!-- Bar 1 (top) -->
+    <rect x="60" y="60" width="136" height="28" rx="4"/>
+    
+    <!-- Bar 2 (middle) -->
+    <rect x="60" y="104" width="136" height="28" rx="4"/>
+    
+    <!-- Bar 3 (bottom) -->
+    <rect x="60" y="148" width="136" height="28" rx="4"/>
+    
+    <!-- Accent dots -->
+    <circle cx="186" cy="74" r="6"/>
+    <circle cx="186" cy="118" r="6"/>
+    <circle cx="186" cy="162" r="6"/>
+  </g>
+</svg>

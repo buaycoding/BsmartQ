@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<%- include('partials/head', { title: 'BsmartQ | Admin Console' }) %>
+<body class="flex flex-col min-h-full font-sans antialiased">
+  <%- include('partials/navbar') %>
+  <section class="py-16">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
+        <div>
+          <div class="inline-flex items-center space-x-2 bg-slate-800/80 px-3 py-1 rounded-full text-xs font-semibold text-brand-500 border border-slate-700">
+            <i class="fa-solid fa-screwdriver-wrench"></i>
+            <span>Administrator Console</span>
+          </div>
+          <h1 class="mt-4 text-4xl font-extrabold text-white">Admin workspace</h1>
+          <p class="text-slate-400 mt-2">Tenant controls, service policy, and operational overrides are reserved for privileged users.</p>
+        </div>
+        <a href="/logout" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-5 py-3 rounded-lg border border-slate-700 transition">Logout</a>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <p class="text-xs text-slate-500 uppercase mb-2">Signed In As</p>
+          <p class="text-lg font-bold text-white"><%= user.name %></p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <p class="text-xs text-slate-500 uppercase mb-2">Role</p>
+          <p class="text-lg font-bold text-white"><%= user.role %></p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <p class="text-xs text-slate-500 uppercase mb-2">Tenant</p>
+          <p class="text-lg font-bold text-white"><%= user.tenantId %></p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <%- include('partials/footer') %>
+</body>
+</html>

@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+package-lock.json
+npm-debug.log
+yarn.lock
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build outputs
+dist/
+build/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Electron
+out/
+release/

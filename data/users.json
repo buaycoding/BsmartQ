@@ -1,0 +1,13 @@
+[
+  {
+    "id": "admin-001",
+    "name": "System Admin",
+    "email": "buay@admin.com",
+    "password": "$2a$12$FBRDwhfYYCyAAug2qJPTkuS64g6djSN5yE8wVZmvYqgHWLVSlaxZm",
+    "role": "admin",
+    "tenantId": "tenant-default-001",
+    "tenantName": "Main Downtown Branch",
+    "branchId": "branch-main-downtown",
+    "createdAt": "2026-07-26T11:09:20.436Z"
+  }
+]

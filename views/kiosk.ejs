@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<%- include('partials/head', { title: 'BsmartQ | Kiosk Touch' }) %>
+<body class="flex flex-col min-h-full font-sans antialiased">
+  <%- include('partials/navbar') %>
+  <section class="py-16">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+        <div class="space-y-5">
+          <div class="inline-flex items-center space-x-2 bg-slate-800/80 px-3 py-1 rounded-full text-xs font-semibold text-brand-500 border border-slate-700">
+            <i class="fa-solid fa-ticket"></i>
+            <span>Self-Service Kiosk</span>
+          </div>
+          <h1 class="text-4xl font-extrabold text-white">Customer queue intake</h1>
+          <p class="text-slate-400">Issue tickets, prioritize walk-ins, print receipts, and route customers to the best available counter in a single flow.</p>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <p class="text-xs text-slate-500 uppercase mb-2">Queue Type</p>
+              <p class="text-lg font-bold text-white">Walk-in</p>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <p class="text-xs text-slate-500 uppercase mb-2">Mode</p>
+              <p class="text-lg font-bold text-white">Touch</p>
+            </div>
+          </div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+          <div class="space-y-4">
+            <div class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white">Select service type</div>
+            <div class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-300">New customer ticket</div>
+            <div class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-300">Priority / VIP queue</div>
+            <div class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-300">Reactivation / follow-up</div>
+            <button class="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold px-4 py-3 rounded-lg transition">Generate Ticket</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <%- include('partials/footer') %>
+</body>
+</html>

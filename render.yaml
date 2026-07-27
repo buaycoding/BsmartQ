@@ -27,6 +27,8 @@ services:
         fromDatabase:
           name: bsmartq-db
           property: password
+      - key: DB_SSL
+        value: "true"
       - key: PORT
         value: "3000"
       - key: IS_OFFLINE_MODE

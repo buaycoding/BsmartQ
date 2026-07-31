@@ -47,42 +47,82 @@
         <button type="button" id="stopAutoCallBtn" class="rounded-lg border border-amber-500/40 bg-amber-600/20 px-3 py-2 text-sm font-semibold text-amber-300">Stop auto call</button>
       </div>
 
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-800">
-          <h2 class="text-lg font-bold text-white">Active Queue Feed</h2>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="min-w-full text-left text-sm text-slate-300">
-            <thead class="bg-slate-950 text-slate-400">
-              <tr>
-                <th class="px-6 py-3 font-semibold">Ticket</th>
-                <th class="px-6 py-3 font-semibold">Status</th>
-                <th class="px-6 py-3 font-semibold">Assigned Counter</th>
-                <th class="px-6 py-3 font-semibold">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              <% queueItems.forEach((item) => { %>
-                <tr class="border-t border-slate-800">
-                  <td class="px-6 py-4 text-white font-semibold"><%= item.ticket %></td>
-                  <td class="px-6 py-4">
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-200">
-                      <%= item.status %>
-                    </span>
-                  </td>
-                  <td class="px-6 py-4"><%= item.counter %></td>
-                  <td class="px-6 py-4">
-                    <form action="/queue/action" method="POST" class="flex flex-wrap gap-2">
-                      <input type="hidden" name="ticket" value="<%= item.ticket %>">
-                      <button type="submit" name="action" value="serve" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-md text-xs font-semibold">Serve</button>
-                      <button type="submit" name="action" value="complete" class="bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded-md text-xs font-semibold">Complete</button>
-                      <button type="submit" name="action" value="requeue" class="bg-amber-600 hover:bg-amber-500 px-3 py-2 rounded-md text-xs font-semibold">Requeue</button>
-                    </form>
-                  </td>
+      <div class="space-y-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-slate-800">
+            <h2 class="text-lg font-bold text-white">Active Queue Feed</h2>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-left text-sm text-slate-300">
+              <thead class="bg-slate-950 text-slate-400">
+                <tr>
+                  <th class="px-6 py-3 font-semibold">Ticket</th>
+                  <th class="px-6 py-3 font-semibold">Status</th>
+                  <th class="px-6 py-3 font-semibold">Assigned Counter</th>
+                  <th class="px-6 py-3 font-semibold">Action</th>
                 </tr>
-              <% }) %>
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                <% queueItems.forEach((item) => { %>
+                  <tr class="border-t border-slate-800">
+                    <td class="px-6 py-4 text-white font-semibold"><%= item.ticket %></td>
+                    <td class="px-6 py-4">
+                      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-200">
+                        <%= item.status %>
+                      </span>
+                    </td>
+                    <td class="px-6 py-4"><%= item.counter %></td>
+                    <td class="px-6 py-4">
+                      <form action="/queue/action" method="POST" class="flex flex-wrap gap-2">
+                        <input type="hidden" name="ticket" value="<%= item.ticket %>">
+                        <button type="submit" name="action" value="serve" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-md text-xs font-semibold">Serve</button>
+                        <button type="submit" name="action" value="complete" class="bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded-md text-xs font-semibold">Complete</button>
+                        <button type="submit" name="action" value="requeue" class="bg-amber-600 hover:bg-amber-500 px-3 py-2 rounded-md text-xs font-semibold">Requeue</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-slate-800">
+            <h2 class="text-lg font-bold text-white">Served & Completed History</h2>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-left text-sm text-slate-300">
+              <thead class="bg-slate-950 text-slate-400">
+                <tr>
+                  <th class="px-6 py-3 font-semibold">Ticket</th>
+                  <th class="px-6 py-3 font-semibold">Status</th>
+                  <th class="px-6 py-3 font-semibold">Counter</th>
+                  <th class="px-6 py-3 font-semibold">Service Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (historyItems && historyItems.length) { %>
+                  <% historyItems.forEach((item) => { %>
+                    <tr class="border-t border-slate-800">
+                      <td class="px-6 py-4 text-white font-semibold"><%= item.ticket %></td>
+                      <td class="px-6 py-4">
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold <%= item.status === 'Completed' ? 'bg-sky-600/20 text-sky-300' : 'bg-emerald-600/20 text-emerald-300' %>">
+                          <%= item.status %>
+                        </span>
+                      </td>
+                      <td class="px-6 py-4"><%= item.counter %></td>
+                      <td class="px-6 py-4"><%= item.serviceType || 'General' %></td>
+                    </tr>
+                  <% }) %>
+                <% } else { %>
+                  <tr class="border-t border-slate-800">
+                    <td class="px-6 py-4 text-slate-400" colspan="4">No served or completed tickets yet.</td>
+                  </tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

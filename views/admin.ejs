@@ -31,6 +31,42 @@
           <p class="text-lg font-bold text-white"><%= user.tenantId %></p>
         </div>
       </div>
+
+      <% if (typeof error !== 'undefined' && error) { %>
+        <div class="mt-6 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"><%= error %></div>
+      <% } %>
+      <% if (typeof notice !== 'undefined' && notice) { %>
+        <div class="mt-6 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300"><%= notice %></div>
+      <% } %>
+
+      <div class="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <p class="text-xs uppercase tracking-[0.24em] text-brand-400">Account approvals</p>
+            <h2 class="mt-2 text-2xl font-bold text-white">Pending and active workspace users</h2>
+          </div>
+        </div>
+        <div class="mt-6 space-y-3">
+          <% if (typeof inviteMembers !== 'undefined' && inviteMembers && inviteMembers.length) { %>
+            <% inviteMembers.forEach(function(member) { %>
+              <div class="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p class="font-semibold text-white"><%= member.name %></p>
+                  <p class="text-sm text-slate-400"><%= member.email %> • <%= member.role %></p>
+                  <p class="text-xs text-slate-500 mt-1">Approved: <%= member.is_approved ? 'Yes' : 'No' %> • Active: <%= member.is_active ? 'Yes' : 'No' %></p>
+                </div>
+                <form action="/admin/approve-user" method="POST" class="flex gap-2">
+                  <input type="hidden" name="userId" value="<%= member.id %>">
+                  <button type="submit" name="action" value="approve" class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Approve</button>
+                  <button type="submit" name="action" value="reject" class="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white">Reject</button>
+                </form>
+              </div>
+            <% }); %>
+          <% } else { %>
+            <p class="text-sm text-slate-400">No workspace members yet.</p>
+          <% } %>
+        </div>
+      </div>
     </div>
   </section>
   <%- include('partials/footer') %>

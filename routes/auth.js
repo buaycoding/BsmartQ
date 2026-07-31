@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const { sendEmailNotification } = require('../lib/notifications');
 
 const router = express.Router();
 const COOKIE_NAME = 'bsmartq_session';
@@ -35,6 +36,9 @@ async function initializeAuthTable() {
         branch_id TEXT,
         organization_name TEXT,
         invited_by TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        is_approved BOOLEAN NOT NULL DEFAULT TRUE,
+        approval_note TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -54,8 +58,8 @@ async function initializeAuthTable() {
     if (adminExists.rows.length === 0) {
       const hashedPassword = bcrypt.hashSync(ADMIN_PASSWORD, 12);
       await dbPool.query(
-        `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+        `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, is_active, is_approved, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
         [
           'admin-001',
           'System Admin',
@@ -65,6 +69,8 @@ async function initializeAuthTable() {
           'tenant-default-001',
           'Main Downtown Branch',
           'branch-main-downtown',
+          true,
+          true,
         ]
       );
       console.log('✅ Admin user seeded to PostgreSQL');
@@ -114,8 +120,8 @@ async function createWorkspaceInvite({ inviter, email, name, role = 'counter' })
   const userId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const result = await dbPool.query(
-    `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, organization_name, invited_by, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+    `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, organization_name, invited_by, is_active, is_approved, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
      RETURNING *`,
     [
       userId,
@@ -128,6 +134,8 @@ async function createWorkspaceInvite({ inviter, email, name, role = 'counter' })
       inviter.branch_id || 'branch-main-downtown',
       inviter.organizationName || inviter.tenant_name || 'Workspace',
       inviter.email,
+      false,
+      false,
     ]
   );
 
@@ -141,7 +149,7 @@ async function listWorkspaceMembers(tenantId) {
   }
 
   const result = await dbPool.query(
-    'SELECT id, name, email, role, created_at FROM users WHERE tenant_id = $1 ORDER BY created_at DESC',
+    'SELECT id, name, email, role, is_active, is_approved, created_at FROM users WHERE tenant_id = $1 ORDER BY created_at DESC',
     [tenantId]
   );
 
@@ -172,6 +180,8 @@ async function resetAuthStore() {
         'tenant-default-001',
         'Main Downtown Branch',
         'branch-main-downtown',
+        true,
+        true,
       ]
     );
 
@@ -340,6 +350,24 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    if (!user.is_approved) {
+      return res.status(403).render('auth/login', {
+        title: 'BsmartQ | Sign In',
+        error: 'Your account is pending admin approval.',
+        notice: null,
+        user: req.user || null,
+      });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).render('auth/login', {
+        title: 'BsmartQ | Sign In',
+        error: 'Your account has been disabled.',
+        notice: null,
+        user: req.user || null,
+      });
+    }
+
     setSessionCookie(res, user);
     res.redirect('/dashboard');
   } catch (error) {
@@ -431,8 +459,8 @@ router.post('/register', async (req, res) => {
     const userId = `user-${Date.now()}`;
 
     await dbPool.query(
-      `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, organization_name, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+      `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, organization_name, is_active, is_approved, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
       [
         userId,
         String(name).trim(),
@@ -443,8 +471,20 @@ router.post('/register', async (req, res) => {
         organizationName,
         'branch-main-downtown',
         organizationName,
+        true,
+        false,
       ]
     );
+
+    try {
+      await sendEmailNotification({
+        to: normalizedEmail,
+        subject: 'BsmartQ account pending approval',
+        text: `Hello ${name}, your BsmartQ workspace account has been created and is pending admin approval. Once approved you can sign in and use the queue tools.`,
+      });
+    } catch (emailError) {
+      console.warn('Registration email failed:', emailError.message);
+    }
 
     res.redirect('/login?registered=1');
   } catch (error) {
@@ -468,11 +508,21 @@ router.post('/invite', requireAuth, async (req, res) => {
 
     const members = await listWorkspaceMembers(req.user.tenant_id);
 
+    try {
+      await sendEmailNotification({
+        to: result.user.email,
+        subject: 'You have been invited to BsmartQ',
+        text: `Hello ${result.user.name}, you have been invited to join the BsmartQ workspace as ${result.user.role}. Your temporary password is ${result.temporaryPassword}. Please sign in and wait for admin approval.`,
+      });
+    } catch (emailError) {
+      console.warn('Invite email failed:', emailError.message);
+    }
+
     return res.render('dashboard', {
       title: 'BsmartQ | Dashboard',
       user: req.user,
       error: null,
-      notice: `Invited ${result.user.name} to your workspace. Temporary password: ${result.temporaryPassword}`,
+      notice: `Invited ${result.user.name} to your workspace. They will receive an email and must wait for admin approval. Temporary password: ${result.temporaryPassword}`,
       inviteMembers: members,
     });
   } catch (error) {
@@ -503,11 +553,64 @@ router.get('/dashboard', requireAuth, async (req, res) => {
   });
 });
 
-router.get('/admin', requireAuth, requireRole('admin'), (req, res) => {
+router.get('/admin', requireAuth, requireRole('admin'), async (req, res) => {
+  const members = await listWorkspaceMembers(req.user.tenant_id);
   res.render('admin', {
     title: 'BsmartQ | Admin Console',
     user: req.user,
+    inviteMembers: members,
   });
+});
+
+router.post('/admin/approve-user', requireAuth, requireRole('admin'), async (req, res) => {
+  const userId = String(req.body?.userId || '').trim();
+  const action = String(req.body?.action || '').trim();
+
+  if (!userId || !['approve', 'reject'].includes(action)) {
+    const members = await listWorkspaceMembers(req.user.tenant_id);
+    return res.render('admin', {
+      title: 'BsmartQ | Admin Console',
+      user: req.user,
+      error: 'Invalid approval action.',
+      inviteMembers: members,
+    });
+  }
+
+  try {
+    const result = await dbPool.query(
+      action === 'approve'
+        ? 'UPDATE users SET is_approved = TRUE, is_active = TRUE, updated_at = NOW() WHERE id = $1 RETURNING *'
+        : 'UPDATE users SET is_approved = FALSE, is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING *',
+      [userId]
+    );
+
+    const target = result.rows[0];
+    if (target) {
+      await sendEmailNotification({
+        to: target.email,
+        subject: action === 'approve' ? 'BsmartQ account approved' : 'BsmartQ account rejected',
+        text: action === 'approve'
+          ? `Hello ${target.name}, your BsmartQ account has been approved. You can sign in now.`
+          : `Hello ${target.name}, your BsmartQ account request has been rejected. Please contact the administrator for more details.`,
+      });
+    }
+
+    const members = await listWorkspaceMembers(req.user.tenant_id);
+    return res.render('admin', {
+      title: 'BsmartQ | Admin Console',
+      user: req.user,
+      notice: action === 'approve' ? 'User approved successfully.' : 'User rejected successfully.',
+      inviteMembers: members,
+    });
+  } catch (error) {
+    const members = await listWorkspaceMembers(req.user.tenant_id);
+    return res.render('admin', {
+      title: 'BsmartQ | Admin Console',
+      user: req.user,
+      error: error.message,
+      inviteMembers: members,
+    });
+  }
 });
 
 module.exports = {

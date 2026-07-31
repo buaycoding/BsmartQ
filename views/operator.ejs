@@ -13,7 +13,10 @@
           </div>
           <h1 class="mt-4 text-4xl font-extrabold text-white">Live service desk</h1>
         </div>
-        <div class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-emerald-300">Counter 03 · Ready</div>
+        <div class="flex items-center gap-3">
+          <a href="/" class="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-700">Go Home</a>
+          <div class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-emerald-300">Counter 03 · Ready</div>
+        </div>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -31,11 +34,72 @@
       </div>
 
       <div class="mt-6 bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <p class="text-xs text-slate-500 uppercase mb-2">Counter Status</p>
-        <p class="text-lg font-semibold text-emerald-300">Counter <%= activeCounter %> · Ready for the next ticket</p>
+        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p class="text-xs text-slate-500 uppercase mb-2">Counter Status</p>
+            <p class="text-lg font-semibold text-emerald-300">Counter <%= activeCounter %> · Ready for the next ticket</p>
+          </div>
+          <button id="auto-call-btn" type="button" class="rounded-lg bg-brand-600 px-4 py-3 font-semibold text-white hover:bg-brand-500">Auto Call Next Ticket</button>
+        </div>
+        <div class="mt-4 rounded-lg border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+          <p id="auto-call-status">Click the button to announce the next ticket three times with a sound.</p>
+        </div>
       </div>
     </div>
   </section>
   <%- include('partials/footer') %>
+  <script>
+    (function () {
+      const nextTicket = '<%= nextInLineTicket %>';
+      const button = document.getElementById('auto-call-btn');
+      const status = document.getElementById('auto-call-status');
+
+      function beep() {
+        const context = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 880;
+        gain.gain.value = 0.08;
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start();
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.25);
+        oscillator.stop(context.currentTime + 0.25);
+        context.close().catch(() => {});
+      }
+
+      function announceTicket(ticket) {
+        if (!ticket || ticket === '—') {
+          if (status) status.textContent = 'No ticket is available to call.';
+          return;
+        }
+
+        if (status) status.textContent = `Calling ${ticket}...`;
+
+        for (let index = 0; index < 3; index += 1) {
+          setTimeout(() => {
+            beep();
+            if ('speechSynthesis' in window) {
+              window.speechSynthesis.cancel();
+              const utterance = new SpeechSynthesisUtterance(`Ticket ${ticket}`);
+              utterance.rate = 1.0;
+              window.speechSynthesis.speak(utterance);
+            }
+          }, index * 1200);
+        }
+
+        fetch('/queue/auto-call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticket })
+        }).catch(() => {});
+      }
+
+      if (button) {
+        button.addEventListener('click', () => announceTicket(nextTicket));
+      }
+    })();
+  </script>
 </body>
 </html>

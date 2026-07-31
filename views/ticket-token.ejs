@@ -2,8 +2,7 @@
 <html lang="en" class="h-full bg-slate-950 text-slate-100">
 <%- include('partials/head', { title: title || 'Ticket Token' }) %>
 <body class="flex flex-col min-h-full font-sans antialiased">
-  <%- include('partials/navbar') %>
-  <section class="py-16">
+  <section class="py-8 sm:py-16">
     <div class="max-w-md mx-auto px-4 sm:px-6 lg:px-8">
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center">
         <p class="text-xs text-slate-400 uppercase">Your Ticket</p>
@@ -18,9 +17,8 @@
           <% } %>
         </div>
 
-        <div class="mt-4 flex justify-center gap-3">
+        <div class="mt-4 flex justify-center">
           <a href="/tickets/token/<%= ticket %>/qr.png" download class="bg-brand-600 px-4 py-2 rounded-md text-white font-semibold">Download QR</a>
-          <a href="/queue/board" class="bg-slate-800 px-4 py-2 rounded-md text-slate-200">Open Queue Board</a>
         </div>
 
         <div class="mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-left">
@@ -67,14 +65,20 @@
             <form action="/tickets/notify" method="POST" class="space-y-3">
               <input type="hidden" name="ticket" value="<%= ticket %>">
               <div>
-                <label class="block text-sm text-slate-300 mb-1">Phone number (E.164 format preferred)</label>
-                <input name="phone" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="+1234567890">
+                <label class="block text-sm text-slate-300 mb-1">Phone number</label>
+                <input name="phone" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="e.g. +256775123456 or 0775123456">
               </div>
               <div>
                 <button type="submit" class="w-full bg-emerald-600 px-4 py-2 rounded-md text-white font-semibold">Notify me</button>
               </div>
             </form>
           <% } %>
+        </div>
+
+        <div class="mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-left">
+          <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Customer queue tracker</p>
+          <h2 class="mt-1 text-lg font-semibold text-white">Track this queue token only</h2>
+          <p class="mt-2 text-sm text-slate-400">This page is your personal queue tracking view. It shows only your ticket progress and does not expose the rest of the system.</p>
         </div>
       </div>
     </div>

@@ -81,7 +81,7 @@ const BRANCH_NAME = process.env.BRANCH_NAME || 'Main Downtown Branch';
 
 const queueState = {
   tickets: [],
-  sequence: 10,
+  sequence: 0,
 };
 
 // In-memory subscriber store used as fallback when DB is unavailable
@@ -245,17 +245,30 @@ function issueTicket(serviceType = 'General') {
 }
 
 function getQueueBoardPayload() {
+  const activeQueueItems = queueState.tickets.filter((item) => item.status === 'Waiting');
+  const historyItems = queueState.tickets
+    .filter((item) => item.status === 'Serving' || item.status === 'Completed')
+    .slice(0, 10)
+    .map((item) => ({
+      ticket: item.ticket,
+      status: item.status,
+      counter: item.counter,
+      serviceType: item.serviceType,
+      createdAt: item.createdAt,
+    }));
+
   return {
-    waitingCount: queueState.tickets.filter((item) => item.status === 'Waiting').length,
+    waitingCount: activeQueueItems.length,
     servingNow: Math.max(0, queueState.tickets.filter((item) => item.status === 'Serving').length),
     avgServiceTime: 4.8,
     completedToday: 148,
-    queueItems: queueState.tickets.slice(0, 6).map((item) => ({
+    queueItems: activeQueueItems.slice(0, 6).map((item) => ({
       ticket: item.ticket,
       status: item.status,
       counter: item.counter,
       serviceType: item.serviceType,
     })),
+    historyItems,
   };
 }
 
@@ -452,7 +465,7 @@ app.use(async (req, res, next) => {
   if (verified && verified.email && dbStatus.connected) {
     try {
       const result = await dbPool.query(
-        'SELECT id, name, email, role, tenant_id, tenant_name, branch_id FROM users WHERE email = $1',
+        'SELECT id, name, email, role, tenant_id, tenant_name, branch_id, organization_name, is_active, is_approved FROM users WHERE email = $1',
         [verified.email]
       );
       
@@ -840,8 +853,18 @@ app.post('/queue/action', requireAuth, async (req, res) => {
     user: req.user || null,
     queueStats: payload,
     queueItems: payload.queueItems,
+    historyItems: payload.historyItems,
     statusMessage,
   });
+});
+
+app.post('/queue/auto-call', requireAuth, (req, res) => {
+  const ticket = String(req.body?.ticket || '').trim();
+  if (!ticket) {
+    return res.status(400).json({ ok: false, error: 'No ticket selected.' });
+  }
+
+  return res.json({ ok: true, ticket, message: `Calling ${ticket} three times.` });
 });
 
 app.get('/display', requireAuth, (req, res) => {

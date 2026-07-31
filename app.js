@@ -34,14 +34,27 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   }
 }
 
-const dbPool = new Pool({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 5432),
-  database: process.env.DB_NAME || 'smartq',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'buayca10',
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-});
+function buildDbConfig() {
+  const databaseUrl = process.env.DATABASE_URL || process.env.DB_URL || process.env.POSTGRES_URL || '';
+
+  if (databaseUrl) {
+    return {
+      connectionString: databaseUrl,
+      ssl: process.env.DB_SSL === 'true' || process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    };
+  }
+
+  return {
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: Number(process.env.DB_PORT || 5432),
+    database: process.env.DB_NAME || 'smartq',
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'buayca10',
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  };
+}
+
+const dbPool = new Pool(buildDbConfig());
 
 let dbStatus = { connected: false, error: null };
 

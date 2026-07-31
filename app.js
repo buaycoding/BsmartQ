@@ -20,7 +20,13 @@ const {
   initializeAuth,
   initializeAuthTable 
 } = require('./routes/auth');
-require('dotenv').config();
+const dotenv = require('dotenv');
+
+dotenv.config();
+if (process.env.NODE_ENV) {
+  const envPath = path.resolve(process.cwd(), `.env.${process.env.NODE_ENV}`);
+  dotenv.config({ path: envPath });
+}
 const QRCode = require('qrcode');
 let TwilioClient = null;
 if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {

@@ -18,18 +18,26 @@
       </div>
 
       <!-- Navigation Links -->
-      <div class="hidden md:flex items-center space-x-8 text-sm font-medium text-slate-300">
-        <a href="/kiosk/touch" class="transition <%= navPath === '/kiosk' || navPath === '/kiosk/touch' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">Kiosk Mode</a>
-        <a href="/counter/operator" class="transition <%= navPath === '/counter/operator' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">Counters</a>
-        <a href="/display" class="transition <%= navPath === '/display' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">Live Displays</a>
-        <a href="/analytics/ai" class="transition <%= navPath === '/analytics/ai' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">AI Insights</a>
-      </div>
+      <% if (String(user && user.role || '').toLowerCase() !== 'admin') { %>
+        <div class="hidden md:flex items-center space-x-8 text-sm font-medium text-slate-300">
+          <a href="/kiosk/touch" class="transition <%= navPath === '/kiosk' || navPath === '/kiosk/touch' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">Kiosk Mode</a>
+          <a href="/counter/operator" class="transition <%= navPath === '/counter/operator' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">Counters</a>
+          <a href="/display" class="transition <%= navPath === '/display' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">Live Displays</a>
+          <a href="/analytics/ai" class="transition <%= navPath === '/analytics/ai' ? 'text-white font-semibold border-b-2 border-brand-500 pb-1' : 'hover:text-white' %>">AI Insights</a>
+        </div>
+      <% } %>
 
       <!-- Action Button -->
       <div class="flex items-center space-x-4">
         <% if (user) { %>
-          <span class="text-sm text-slate-400">Tenant: <strong class="text-white"><%= user.tenantName %></strong></span>
-          <a href="/dashboard" class="bg-brand-600 hover:bg-brand-500 px-4 py-2 rounded-md text-sm font-semibold transition">Dashboard</a>
+          <% if (String(user.role || '').toLowerCase() !== 'admin') { %>
+            <span class="text-sm text-slate-400">Tenant: <strong class="text-white"><%= user.tenantName || user.organizationName || user.tenantId %></strong></span>
+          <% } %>
+          <% if (String(user.role || '').toLowerCase() === 'admin') { %>
+            <a href="/admin" class="bg-brand-600 hover:bg-brand-500 px-4 py-2 rounded-md text-sm font-semibold transition">Admin Console</a>
+          <% } else { %>
+            <a href="/dashboard" class="bg-brand-600 hover:bg-brand-500 px-4 py-2 rounded-md text-sm font-semibold transition">Dashboard</a>
+          <% } %>
         <% } else { %>
           <a href="/register" class="bg-brand-600 hover:bg-brand-500 px-4 py-2 rounded-md text-sm font-semibold transition">Launch Workspace</a>
         <% } %>

@@ -20,6 +20,7 @@ const {
   initializeAuth,
   initializeAuthTable 
 } = require('./routes/auth');
+const { sendSmsNotification } = require('./lib/notifications');
 const dotenv = require('dotenv');
 
 dotenv.config();
@@ -33,11 +34,19 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   try {
     const twilio = require('twilio');
     TwilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    console.log('Twilio client initialized');
+    console.log('✅ Twilio client initialized for SMS delivery');
   } catch (e) {
     console.warn('Twilio not available:', e.message);
     TwilioClient = null;
   }
+} else {
+  console.warn('⚠️ Twilio SMS credentials not configured; SMS notifications will be logged only');
+}
+
+if (process.env.SENDGRID_API_KEY) {
+  console.log('✅ SendGrid API key detected for email delivery');
+} else {
+  console.warn('⚠️ SendGrid API key not configured; email will fall back to SMTP if provided');
 }
 
 function buildDbConfig() {
@@ -730,14 +739,12 @@ app.post('/tickets/notify', (req, res) => {
       tokenSubscriptions[ticketKey] = { phone, notified: false };
     }
 
-    // confirmation SMS when Twilio available
-    if (TwilioClient && process.env.TWILIO_FROM) {
-      TwilioClient.messages.create({
-        from: process.env.TWILIO_FROM,
-        to: phone,
-        body: `Subscription confirmed for ${ticketKey}. We'll notify you when it's your turn.`,
-      }).catch((err) => console.warn('Twilio notify failed:', err.message));
-    }
+    void sendSmsNotification({
+      twilioClient: TwilioClient,
+      to: phone,
+      body: `Subscription confirmed for ${ticketKey}. We'll notify you when it's your turn.`,
+      from: process.env.TWILIO_FROM,
+    });
   })();
 
   res.redirect(`/tickets/token/${encodeURIComponent(ticketKey)}`);
@@ -779,29 +786,24 @@ app.post('/queue/action', requireAuth, async (req, res) => {
       const dbSub = await dbGetSubscription(ticket).catch(() => null);
       let phone = dbSub ? dbSub.phone : (tokenSubscriptions[ticket] ? tokenSubscriptions[ticket].phone : null);
       if (phone) {
-        if (TwilioClient && process.env.TWILIO_FROM) {
-          TwilioClient.messages.create({
-            from: process.env.TWILIO_FROM,
-            to: phone,
-            body: `Your ticket ${ticket} is now being served at Counter 03. Please proceed.`,
-          }).then(() => {
-            console.log(`Twilio sent serving SMS to ${phone} for ${ticket}`);
-            // move to completion cache and delete active subscription
-            completionCache[ticket] = { phone: phone, expiresAt: Date.now() + COMPLETION_RETENTION_MS };
-            if (dbSub) void dbDeleteSubscription(ticket);
-            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
-          }).catch((err) => {
-            console.warn('Twilio send failure:', err.message);
-            completionCache[ticket] = { phone: phone, expiresAt: Date.now() + COMPLETION_RETENTION_MS };
-            if (dbSub) void dbDeleteSubscription(ticket);
-            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
-          });
-        } else {
-          console.log(`Notification queued for ${phone} (Twilio not configured): ${ticket}`);
+        void sendSmsNotification({
+          twilioClient: TwilioClient,
+          to: phone,
+          body: `Your ticket ${ticket} is now being served at Counter 03. Please proceed.`,
+          from: process.env.TWILIO_FROM,
+        }).then((result) => {
+          if (result.ok) {
+            console.log(`SMS sent for ${ticket} to ${phone}`);
+          }
           completionCache[ticket] = { phone: phone, expiresAt: Date.now() + COMPLETION_RETENTION_MS };
           if (dbSub) void dbDeleteSubscription(ticket);
           if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
-        }
+        }).catch((err) => {
+          console.warn('SMS send failure:', err.message);
+          completionCache[ticket] = { phone: phone, expiresAt: Date.now() + COMPLETION_RETENTION_MS };
+          if (dbSub) void dbDeleteSubscription(ticket);
+          if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+        });
       }
     } catch (e) {
       console.warn('Failed to process subscription notification:', e.message);
@@ -816,28 +818,21 @@ app.post('/queue/action', requireAuth, async (req, res) => {
       const dbSub = await dbGetSubscription(ticket).catch(() => null);
       let phone = dbSub ? dbSub.phone : (completionCache[ticket] ? completionCache[ticket].phone : (tokenSubscriptions[ticket] ? tokenSubscriptions[ticket].phone : null));
       if (phone) {
-        if (TwilioClient && process.env.TWILIO_FROM) {
-          TwilioClient.messages.create({
-            from: process.env.TWILIO_FROM,
-            to: phone,
-            body: `Update: Your ticket ${ticket} has been completed. Thank you for visiting.`,
-          }).then(() => {
-            console.log(`Twilio sent completion SMS to ${phone} for ${ticket}`);
-            if (dbSub) void dbDeleteSubscription(ticket);
-            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
-            if (completionCache[ticket]) delete completionCache[ticket];
-          }).catch((err) => {
-            console.warn('Twilio completion send failed:', err.message);
-            if (dbSub) void dbDeleteSubscription(ticket);
-            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
-            if (completionCache[ticket]) delete completionCache[ticket];
-          });
-        } else {
-          console.log(`Completion notification (Twilio not configured) for ${phone}: ${ticket}`);
+        void sendSmsNotification({
+          twilioClient: TwilioClient,
+          to: phone,
+          body: `Update: Your ticket ${ticket} has been completed. Thank you for visiting.`,
+          from: process.env.TWILIO_FROM,
+        }).then(() => {
           if (dbSub) void dbDeleteSubscription(ticket);
           if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
           if (completionCache[ticket]) delete completionCache[ticket];
-        }
+        }).catch((err) => {
+          console.warn('SMS completion send failed:', err.message);
+          if (dbSub) void dbDeleteSubscription(ticket);
+          if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+          if (completionCache[ticket]) delete completionCache[ticket];
+        });
       }
     } catch (e) {
       console.warn('Failed to send completion notification:', e.message);

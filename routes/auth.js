@@ -39,6 +39,10 @@ async function ensureUsersTableSchema() {
       ['organization_name', 'TEXT'],
       ['invited_by', 'TEXT'],
       ['approval_note', 'TEXT'],
+      ['subscription_plan', "TEXT DEFAULT 'free'"],
+      ['subscription_status', "TEXT DEFAULT 'pending'"],
+      ['organization_status', "TEXT DEFAULT 'active'"],
+      ['is_deleted', 'BOOLEAN NOT NULL DEFAULT FALSE'],
       ['updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'],
     ];
 
@@ -232,6 +236,21 @@ async function listWorkspaceMembers(tenantId) {
   const result = await dbPool.query(
     'SELECT id, name, email, role, is_active, is_approved, created_at FROM users WHERE tenant_id = $1 ORDER BY created_at DESC',
     [tenantId]
+  );
+
+  return result.rows;
+}
+
+async function listOrganizationsForAdmin() {
+  if (!dbPool) {
+    return [];
+  }
+
+  const result = await dbPool.query(
+    `SELECT id, name, email, role, tenant_id, tenant_name, organization_name, branch_id, is_active, is_approved, subscription_plan, subscription_status, organization_status, is_deleted, created_at
+     FROM users
+     WHERE role != 'admin' AND COALESCE(is_deleted, FALSE) = FALSE
+     ORDER BY created_at DESC`
   );
 
   return result.rows;
@@ -542,8 +561,8 @@ router.post('/register', async (req, res) => {
     const userId = `user-${Date.now()}`;
 
     await dbPool.query(
-      `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, organization_name, is_active, is_approved, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+      `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, organization_name, is_active, is_approved, subscription_plan, subscription_status, organization_status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())`,
       [
         userId,
         String(name).trim(),
@@ -556,6 +575,9 @@ router.post('/register', async (req, res) => {
         organizationName,
         true,
         false,
+        'free',
+        'pending',
+        'active',
       ]
     );
 
@@ -626,72 +648,106 @@ router.get('/logout', (req, res) => {
 });
 
 router.get('/dashboard', requireAuth, async (req, res) => {
+  if (req.user && String(req.user.role || '').toLowerCase() === 'admin') {
+    return res.redirect('/admin');
+  }
+
   const members = await listWorkspaceMembers(req.user.tenant_id);
+  const plan = String(req.user?.subscription_plan || 'free').toLowerCase();
+  const paymentStatus = String(req.user?.subscription_status || 'pending').toLowerCase();
+  const hasPaidAccess = ['1-day', '1-month', '3-months', '1-year'].includes(plan) && ['paid', 'active'].includes(paymentStatus);
+
   res.render('dashboard', {
     title: 'BsmartQ | Dashboard',
     user: req.user,
     error: null,
     notice: null,
     inviteMembers: members,
+    plan,
+    paymentStatus,
+    hasPaidAccess,
   });
 });
 
 router.get('/admin', requireAuth, requireRole('admin'), async (req, res) => {
-  const members = await listWorkspaceMembers(req.user.tenant_id);
+  const organizations = await listOrganizationsForAdmin();
+  const pendingApprovals = organizations.filter((org) => !org.is_approved || !org.is_active || String(org.subscription_status || '').toLowerCase() === 'pending');
+
   res.render('admin', {
     title: 'BsmartQ | Admin Console',
     user: req.user,
-    inviteMembers: members,
+    organizations,
+    pendingApprovals,
   });
 });
 
 router.post('/admin/approve-user', requireAuth, requireRole('admin'), async (req, res) => {
   const userId = String(req.body?.userId || '').trim();
   const action = String(req.body?.action || '').trim();
+  const plan = String(req.body?.plan || 'free').trim();
+  const paymentStatus = String(req.body?.paymentStatus || 'pending').trim();
 
-  if (!userId || !['approve', 'reject'].includes(action)) {
-    const members = await listWorkspaceMembers(req.user.tenant_id);
+  if (!userId || !['approve', 'reject', 'update-plan', 'delete'].includes(action)) {
+    const organizations = await listOrganizationsForAdmin();
     return res.render('admin', {
       title: 'BsmartQ | Admin Console',
       user: req.user,
-      error: 'Invalid approval action.',
-      inviteMembers: members,
+      error: 'Invalid admin action.',
+      organizations,
+      pendingApprovals: organizations.filter((org) => !org.is_approved || !org.is_active || String(org.subscription_status || '').toLowerCase() === 'pending'),
     });
   }
 
   try {
-    const result = await dbPool.query(
-      action === 'approve'
-        ? 'UPDATE users SET is_approved = TRUE, is_active = TRUE, updated_at = NOW() WHERE id = $1 RETURNING *'
-        : 'UPDATE users SET is_approved = FALSE, is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING *',
-      [userId]
-    );
+    let updateQuery = '';
+    let values = [];
 
+    if (action === 'approve') {
+      updateQuery = `UPDATE users SET is_approved = TRUE, is_active = TRUE, subscription_status = 'active', updated_at = NOW() WHERE id = $1 RETURNING *`;
+      values = [userId];
+    } else if (action === 'reject') {
+      updateQuery = `UPDATE users SET is_approved = FALSE, is_active = FALSE, subscription_status = 'inactive', updated_at = NOW() WHERE id = $1 RETURNING *`;
+      values = [userId];
+    } else if (action === 'update-plan') {
+      updateQuery = `UPDATE users SET subscription_plan = $2, subscription_status = $3, is_active = $4, updated_at = NOW() WHERE id = $1 RETURNING *`;
+      values = [userId, plan, paymentStatus, ['active', 'paid'].includes(paymentStatus) ? true : false];
+    } else if (action === 'delete') {
+      updateQuery = `UPDATE users SET is_deleted = TRUE, is_active = FALSE, is_approved = FALSE, subscription_status = 'inactive', updated_at = NOW() WHERE id = $1 RETURNING *`;
+      values = [userId];
+    }
+
+    const result = await dbPool.query(updateQuery, values);
     const target = result.rows[0];
     if (target) {
       await sendEmailNotification({
         to: target.email,
-        subject: action === 'approve' ? 'BsmartQ account approved' : 'BsmartQ account rejected',
+        subject: action === 'approve' ? 'BsmartQ account approved' : action === 'reject' ? 'BsmartQ account rejected' : action === 'delete' ? 'BsmartQ organization removed' : 'BsmartQ package updated',
         text: action === 'approve'
           ? `Hello ${target.name}, your BsmartQ account has been approved. You can sign in now.`
-          : `Hello ${target.name}, your BsmartQ account request has been rejected. Please contact the administrator for more details.`,
+          : action === 'reject'
+            ? `Hello ${target.name}, your BsmartQ account request has been rejected. Please contact the administrator for more details.`
+            : action === 'delete'
+              ? `Hello ${target.name}, your BsmartQ organization account has been removed by the administrator.`
+              : `Hello ${target.name}, your BsmartQ package has been updated to ${plan}.`,
       });
     }
 
-    const members = await listWorkspaceMembers(req.user.tenant_id);
+    const organizations = await listOrganizationsForAdmin();
     return res.render('admin', {
       title: 'BsmartQ | Admin Console',
       user: req.user,
-      notice: action === 'approve' ? 'User approved successfully.' : 'User rejected successfully.',
-      inviteMembers: members,
+      notice: action === 'approve' ? 'Organization approved successfully.' : action === 'reject' ? 'Organization rejected successfully.' : action === 'delete' ? 'Organization deleted successfully.' : 'Package update saved successfully.',
+      organizations,
+      pendingApprovals: organizations.filter((org) => !org.is_approved || !org.is_active || String(org.subscription_status || '').toLowerCase() === 'pending'),
     });
   } catch (error) {
-    const members = await listWorkspaceMembers(req.user.tenant_id);
+    const organizations = await listOrganizationsForAdmin();
     return res.render('admin', {
       title: 'BsmartQ | Admin Console',
       user: req.user,
       error: error.message,
-      inviteMembers: members,
+      organizations,
+      pendingApprovals: organizations.filter((org) => !org.is_approved || !org.is_active || String(org.subscription_status || '').toLowerCase() === 'pending'),
     });
   }
 });

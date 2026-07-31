@@ -16,6 +16,68 @@ function initializeAuth(pool) {
   dbPool = pool;
 }
 
+async function ensureUsersTableSchema() {
+  if (!dbPool) {
+    return;
+  }
+
+  try {
+    const columnResult = await dbPool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'users'
+    `);
+
+    const existingColumns = new Set(
+      columnResult.rows.map((row) => String(row.column_name).toLowerCase())
+    );
+
+    const columnDefinitions = [
+      ['is_active', 'BOOLEAN NOT NULL DEFAULT TRUE'],
+      ['is_approved', 'BOOLEAN NOT NULL DEFAULT TRUE'],
+      ['tenant_name', 'TEXT'],
+      ['organization_name', 'TEXT'],
+      ['invited_by', 'TEXT'],
+      ['approval_note', 'TEXT'],
+      ['updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'],
+    ];
+
+    for (const [columnName, definition] of columnDefinitions) {
+      if (!existingColumns.has(columnName)) {
+        await dbPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${columnName} ${definition}`);
+        existingColumns.add(columnName);
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to ensure users table schema:', error.message);
+  }
+}
+
+async function normalizeExistingAdminAccounts() {
+  if (!dbPool) {
+    return;
+  }
+
+  try {
+    const adminRows = await dbPool.query(
+      "SELECT id FROM users WHERE LOWER(COALESCE(role, '')) = 'admin'"
+    );
+
+    for (const row of adminRows.rows) {
+      await dbPool.query(
+        `UPDATE users
+         SET is_active = TRUE,
+             is_approved = TRUE,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [row.id]
+      );
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to normalize admin accounts:', error.message);
+  }
+}
+
 // Create users table and seed admin if needed
 async function initializeAuthTable() {
   if (!dbPool) {
@@ -44,26 +106,30 @@ async function initializeAuthTable() {
       );
     `);
 
+    await ensureUsersTableSchema();
+    await normalizeExistingAdminAccounts();
+
     // Create index on email for faster lookups
     await dbPool.query(`
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     `);
 
-    // Seed admin user if not exists
+    const adminEmail = normalizeEmail(ADMIN_EMAIL);
+    const hashedPassword = bcrypt.hashSync(ADMIN_PASSWORD, 12);
+
     const adminExists = await dbPool.query(
       'SELECT id FROM users WHERE email = $1',
-      [normalizeEmail(ADMIN_EMAIL)]
+      [adminEmail]
     );
 
     if (adminExists.rows.length === 0) {
-      const hashedPassword = bcrypt.hashSync(ADMIN_PASSWORD, 12);
       await dbPool.query(
         `INSERT INTO users (id, name, email, password, role, tenant_id, tenant_name, branch_id, is_active, is_approved, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
         [
           'admin-001',
           'System Admin',
-          normalizeEmail(ADMIN_EMAIL),
+          adminEmail,
           hashedPassword,
           'admin',
           'tenant-default-001',
@@ -74,6 +140,21 @@ async function initializeAuthTable() {
         ]
       );
       console.log('✅ Admin user seeded to PostgreSQL');
+    } else {
+      await dbPool.query(
+        `UPDATE users
+         SET name = $2,
+             password = $3,
+             role = $4,
+             tenant_id = $5,
+             tenant_name = $6,
+             branch_id = $7,
+             is_active = TRUE,
+             is_approved = TRUE,
+             updated_at = NOW()
+         WHERE email = $1`,
+        [adminEmail, 'System Admin', hashedPassword, 'admin', 'tenant-default-001', 'Main Downtown Branch', 'branch-main-downtown']
+      );
     }
 
     console.log('✅ Auth table initialized in PostgreSQL');
@@ -180,8 +261,6 @@ async function resetAuthStore() {
         'tenant-default-001',
         'Main Downtown Branch',
         'branch-main-downtown',
-        true,
-        true,
       ]
     );
 
@@ -350,7 +429,11 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    if (!user.is_approved) {
+    const isAdmin = String(user.role || '').toLowerCase() === 'admin';
+    const isApproved = user.is_approved !== false;
+    const isActive = user.is_active !== false;
+
+    if (!isApproved && !isAdmin) {
       return res.status(403).render('auth/login', {
         title: 'BsmartQ | Sign In',
         error: 'Your account is pending admin approval.',
@@ -359,7 +442,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    if (!user.is_active) {
+    if (!isActive && !isAdmin) {
       return res.status(403).render('auth/login', {
         title: 'BsmartQ | Sign In',
         error: 'Your account has been disabled.',

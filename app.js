@@ -21,6 +21,18 @@ const {
   initializeAuthTable 
 } = require('./routes/auth');
 require('dotenv').config();
+const QRCode = require('qrcode');
+let TwilioClient = null;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+  try {
+    const twilio = require('twilio');
+    TwilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    console.log('Twilio client initialized');
+  } catch (e) {
+    console.warn('Twilio not available:', e.message);
+    TwilioClient = null;
+  }
+}
 
 const dbPool = new Pool({
   host: process.env.DB_HOST || '127.0.0.1',
@@ -53,6 +65,67 @@ const queueState = {
   sequence: 10,
 };
 
+// In-memory subscriber store used as fallback when DB is unavailable
+const tokenSubscriptions = {};
+const completionCache = {}; // keep phone for completion notifications after immediate clear
+
+// Completion retention configurable via env (default 30 minutes)
+const COMPLETION_RETENTION_MS = Number(process.env.COMPLETION_RETENTION_MS || 30 * 60 * 1000);
+
+// DB-backed subscription helpers
+async function dbSaveSubscription(ticketKey, phone) {
+  if (!dbStatus.connected) return false;
+  try {
+    await dbPool.query(
+      `INSERT INTO ticket_subscriptions (ticket, phone, notified, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+       ON CONFLICT (ticket) DO UPDATE SET phone = EXCLUDED.phone, notified = EXCLUDED.notified, created_at = CURRENT_TIMESTAMP`,
+      [ticketKey, phone, false]
+    );
+    return true;
+  } catch (e) {
+    console.warn('dbSaveSubscription error:', e.message);
+    return false;
+  }
+}
+
+async function dbGetSubscription(ticketKey) {
+  if (!dbStatus.connected) return null;
+  try {
+    const r = await dbPool.query('SELECT ticket, phone, notified FROM ticket_subscriptions WHERE ticket = $1', [ticketKey]);
+    if (r.rows[0]) return r.rows[0];
+    return null;
+  } catch (e) {
+    console.warn('dbGetSubscription error:', e.message);
+    return null;
+  }
+}
+
+async function dbDeleteSubscription(ticketKey) {
+  if (!dbStatus.connected) return false;
+  try {
+    await dbPool.query('DELETE FROM ticket_subscriptions WHERE ticket = $1', [ticketKey]);
+    return true;
+  } catch (e) {
+    console.warn('dbDeleteSubscription error:', e.message);
+    return false;
+  }
+}
+
+// SSE clients per ticket: { '<ticket>': [res, ...] }
+const sseClients = {};
+
+function clearSubscription(ticketKey) {
+  try {
+    if (tokenSubscriptions[ticketKey]) delete tokenSubscriptions[ticketKey];
+    // also remove from DB if present
+    if (dbStatus.connected) {
+      void dbDeleteSubscription(ticketKey);
+    }
+  } catch (e) {
+    console.warn('clearSubscription error:', e.message);
+  }
+}
+
 async function connectToDatabase() {
   try {
     await dbPool.query('SELECT NOW() AS current_time');
@@ -68,6 +141,16 @@ async function connectToDatabase() {
         avg_wait_minutes INTEGER NOT NULL DEFAULT 0,
         efficiency_score INTEGER NOT NULL DEFAULT 0,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create subscriptions table for ticket notifications
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS ticket_subscriptions (
+        ticket TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        notified BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -183,6 +266,66 @@ function getDisplayPayload() {
   };
 }
 
+function buildPublicTicketUrl(req, ticketKey) {
+  const forwardedProto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  const forwardedHost = String(req.get('x-forwarded-host') || req.get('host') || 'localhost:3000').split(',')[0].trim();
+  const baseUrl = `${forwardedProto}://${forwardedHost.replace(/\/+$/, '')}`;
+  return `${baseUrl}/tickets/token/${encodeURIComponent(ticketKey)}`;
+}
+
+function getTicketQueueSnapshot(ticketKey = '') {
+  const orderedTickets = [...queueState.tickets].reverse();
+  const servingTicket = orderedTickets.find((item) => item.status === 'Serving');
+  const waitingTickets = orderedTickets.filter((item) => item.status === 'Waiting');
+  const currentTicket = queueState.tickets.find((item) => item.ticket === ticketKey) || null;
+  const waitingAhead = waitingTickets.findIndex((item) => item.ticket === ticketKey);
+  const position = currentTicket?.status === 'Serving' ? 0 : waitingAhead >= 0 ? waitingAhead + 1 : waitingTickets.length + 1;
+  const avgServiceMinutes = 4.8;
+  const estimatedWaitMinutes = currentTicket?.status === 'Serving' || currentTicket?.status === 'Completed'
+    ? 0
+    : position > 0 ? Math.max(1, Math.round(position * avgServiceMinutes)) : 0;
+  const nextTicket = waitingTickets[0]?.ticket || '—';
+  const statusLabel = currentTicket?.status === 'Serving'
+    ? 'Now being served'
+    : currentTicket?.status === 'Completed'
+      ? 'Completed'
+      : currentTicket
+        ? 'Waiting in queue'
+        : 'Ticket not found';
+  const progressPercent = currentTicket?.status === 'Serving'
+    ? 100
+    : currentTicket?.status === 'Completed'
+      ? 100
+      : position > 0
+        ? Math.min(95, Math.max(10, Math.round(100 - ((position - 1) * 100) / Math.max(1, waitingTickets.length + 1))))
+        : 0;
+  const progressText = currentTicket?.status === 'Serving'
+    ? 'Your service is in progress.'
+    : currentTicket?.status === 'Completed'
+      ? 'This ticket has already been completed.'
+      : `About ${estimatedWaitMinutes} minutes until your turn.`;
+
+  return {
+    statusLabel,
+    currentServingTicket: servingTicket?.ticket || '—',
+    nextTicket,
+    position: currentTicket?.status === 'Serving' ? 0 : currentTicket?.status === 'Completed' ? 0 : position,
+    positionLabel: currentTicket?.status === 'Serving'
+      ? 'Now being served'
+      : currentTicket?.status === 'Completed'
+        ? 'Completed'
+        : position > 0 ? `${position}${position === 1 ? 'st' : position === 2 ? 'nd' : position === 3 ? 'rd' : 'th'} in line` : 'Queued',
+    estimatedWaitMinutes,
+    estimatedWaitLabel: currentTicket?.status === 'Serving' || currentTicket?.status === 'Completed'
+      ? '0 min'
+      : `${estimatedWaitMinutes} min`,
+    progressPercent,
+    progressText,
+    waitingCount: waitingTickets.length,
+    counter: servingTicket?.counter || 'Counter 03',
+  };
+}
+
 function getAnalyticsPayload() {
   const payload = getQueueBoardPayload();
   const loadForecast = Math.min(18, Math.max(4, Math.round(payload.waitingCount * 0.9 + payload.servingNow)));
@@ -205,6 +348,25 @@ function updateQueueTicket(ticketKey, nextStatus, counter = 'Unassigned') {
   ticket.status = nextStatus;
   if (counter) ticket.counter = counter;
   void syncQueueMetrics(TENANT_ID);
+  // Broadcast SSE update for this ticket
+  try {
+    const clients = sseClients[ticketKey] || [];
+    const payload = JSON.stringify({
+      ticket: ticketKey,
+      status: ticket.status,
+      counter: ticket.counter,
+      queueSnapshot: getTicketQueueSnapshot(ticketKey),
+    });
+    clients.forEach((res) => {
+      try {
+        res.write(`data: ${payload}\n\n`);
+      } catch (e) {
+        // ignore per-client errors
+      }
+    });
+  } catch (e) {
+    console.warn('SSE broadcast error:', e.message);
+  }
   return ticket;
 }
 
@@ -436,6 +598,119 @@ app.post('/tickets/issue', requireAuth, (req, res) => {
   });
 });
 
+// Public token page (shows QR and status) - can be scanned by clients
+app.get('/tickets/token/:ticket', (req, res) => {
+  const ticketKey = String(req.params.ticket || '').trim();
+  if (!ticketKey) return res.status(400).send('Missing ticket identifier');
+
+  const ticket = queueState.tickets.find((t) => t.ticket === ticketKey) || null;
+  const tokenUrl = buildPublicTicketUrl(req, ticketKey);
+  const queueSnapshot = getTicketQueueSnapshot(ticketKey);
+
+  QRCode.toDataURL(tokenUrl)
+    .then((dataUrl) => {
+      res.render('ticket-token', {
+        title: `Ticket ${ticketKey}`,
+        ticket: ticketKey,
+        ticketObj: ticket,
+        qrDataUrl: dataUrl,
+        subscribed: !!tokenSubscriptions[ticketKey],
+        queueSnapshot,
+      });
+    })
+    .catch((err) => {
+      console.warn('Failed to generate QR code:', err.message);
+      res.status(500).send('Unable to generate token QR');
+    });
+});
+
+// Return QR image directly
+app.get('/tickets/token/:ticket/qr.png', (req, res) => {
+  const ticketKey = String(req.params.ticket || '').trim();
+  if (!ticketKey) return res.status(400).send('Missing ticket identifier');
+  const tokenUrl = buildPublicTicketUrl(req, ticketKey);
+  QRCode.toBuffer(tokenUrl, { type: 'png' })
+    .then((buffer) => {
+      res.type('png').send(buffer);
+    })
+    .catch((err) => {
+      console.warn('QR buffer failure:', err.message);
+      res.status(500).send('Unable to generate QR image');
+    });
+});
+
+// Simple JSON status endpoint used by token page polling
+app.get('/tickets/status/:ticket', (req, res) => {
+  const ticketKey = String(req.params.ticket || '').trim();
+  if (!ticketKey) return res.status(400).json({ error: 'Missing ticket' });
+  const ticket = queueState.tickets.find((t) => t.ticket === ticketKey) || null;
+  const queueSnapshot = getTicketQueueSnapshot(ticketKey);
+  res.json({
+    ticket: ticketKey,
+    status: ticket ? ticket.status : 'Unknown',
+    counter: ticket ? ticket.counter : 'Unassigned',
+    queueSnapshot,
+  });
+});
+
+// SSE stream for a ticket to push real-time updates
+app.get('/tickets/stream/:ticket', (req, res) => {
+  const ticketKey = String(req.params.ticket || '').trim();
+  if (!ticketKey) return res.status(400).end();
+
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  // send initial event
+  const ticket = queueState.tickets.find((t) => t.ticket === ticketKey) || null;
+  const initPayload = JSON.stringify({ ticket: ticketKey, status: ticket ? ticket.status : 'Unknown', counter: ticket ? ticket.counter : 'Unassigned' });
+  res.write(`data: ${initPayload}\n\n`);
+
+  // register client
+  sseClients[ticketKey] = sseClients[ticketKey] || [];
+  sseClients[ticketKey].push(res);
+
+  // cleanup on close
+  req.on('close', () => {
+    try {
+      sseClients[ticketKey] = (sseClients[ticketKey] || []).filter((r) => r !== res);
+    } catch (e) {}
+  });
+});
+
+// (Removed test-only internal trigger endpoints for safety)
+
+// Subscribe for SMS notification when the ticket is called
+app.post('/tickets/notify', (req, res) => {
+  const ticketKey = String(req.body?.ticket || '').trim();
+  const phone = String(req.body?.phone || '').trim();
+  if (!ticketKey || !phone) {
+    return res.status(400).send('Ticket and phone number are required');
+  }
+  // persist subscription to DB when possible, fallback to in-memory
+  (async () => {
+    const saved = await dbSaveSubscription(ticketKey, phone);
+    if (!saved) {
+      tokenSubscriptions[ticketKey] = { phone, notified: false };
+    }
+
+    // confirmation SMS when Twilio available
+    if (TwilioClient && process.env.TWILIO_FROM) {
+      TwilioClient.messages.create({
+        from: process.env.TWILIO_FROM,
+        to: phone,
+        body: `Subscription confirmed for ${ticketKey}. We'll notify you when it's your turn.`,
+      }).catch((err) => console.warn('Twilio notify failed:', err.message));
+    }
+  })();
+
+  res.redirect(`/tickets/token/${encodeURIComponent(ticketKey)}`);
+});
+
 app.get('/counter/operator', requireAuth, (req, res) => {
   const payload = getOperatorConsolePayload();
   res.render('operator', {
@@ -456,18 +731,85 @@ app.get('/queue/board', requireAuth, (req, res) => {
   });
 });
 
-app.post('/queue/action', requireAuth, (req, res) => {
+app.post('/queue/action', requireAuth, async (req, res) => {
   const { ticket, action } = req.body || {};
   let statusMessage = null;
 
   if (!ticket) {
     statusMessage = 'No ticket selected.';
   } else if (action === 'serve') {
-    updateQueueTicket(ticket, 'Serving', 'Counter 03');
+    const served = updateQueueTicket(ticket, 'Serving', 'Counter 03');
     statusMessage = `Ticket ${ticket} is now being served.`;
+
+    // Notify subscribed phone number if present and move phone to completionCache, then clear subscription immediately
+    try {
+      // prefer DB subscription
+      const dbSub = await dbGetSubscription(ticket).catch(() => null);
+      let phone = dbSub ? dbSub.phone : (tokenSubscriptions[ticket] ? tokenSubscriptions[ticket].phone : null);
+      if (phone) {
+        if (TwilioClient && process.env.TWILIO_FROM) {
+          TwilioClient.messages.create({
+            from: process.env.TWILIO_FROM,
+            to: phone,
+            body: `Your ticket ${ticket} is now being served at Counter 03. Please proceed.`,
+          }).then(() => {
+            console.log(`Twilio sent serving SMS to ${phone} for ${ticket}`);
+            // move to completion cache and delete active subscription
+            completionCache[ticket] = { phone: phone, expiresAt: Date.now() + COMPLETION_RETENTION_MS };
+            if (dbSub) void dbDeleteSubscription(ticket);
+            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+          }).catch((err) => {
+            console.warn('Twilio send failure:', err.message);
+            completionCache[ticket] = { phone: phone, expiresAt: Date.now() + COMPLETION_RETENTION_MS };
+            if (dbSub) void dbDeleteSubscription(ticket);
+            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+          });
+        } else {
+          console.log(`Notification queued for ${phone} (Twilio not configured): ${ticket}`);
+          completionCache[ticket] = { phone: phone, expiresAt: Date.now() + COMPLETION_RETENTION_MS };
+          if (dbSub) void dbDeleteSubscription(ticket);
+          if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to process subscription notification:', e.message);
+    }
   } else if (action === 'complete') {
-    updateQueueTicket(ticket, 'Completed', 'Counter 03');
+    const completed = updateQueueTicket(ticket, 'Completed', 'Counter 03');
     statusMessage = `Ticket ${ticket} has been completed.`;
+
+    // Send a follow-up SMS on completion using subscription or completionCache, then clear both
+    try {
+      // prefer DB subscription if present
+      const dbSub = await dbGetSubscription(ticket).catch(() => null);
+      let phone = dbSub ? dbSub.phone : (completionCache[ticket] ? completionCache[ticket].phone : (tokenSubscriptions[ticket] ? tokenSubscriptions[ticket].phone : null));
+      if (phone) {
+        if (TwilioClient && process.env.TWILIO_FROM) {
+          TwilioClient.messages.create({
+            from: process.env.TWILIO_FROM,
+            to: phone,
+            body: `Update: Your ticket ${ticket} has been completed. Thank you for visiting.`,
+          }).then(() => {
+            console.log(`Twilio sent completion SMS to ${phone} for ${ticket}`);
+            if (dbSub) void dbDeleteSubscription(ticket);
+            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+            if (completionCache[ticket]) delete completionCache[ticket];
+          }).catch((err) => {
+            console.warn('Twilio completion send failed:', err.message);
+            if (dbSub) void dbDeleteSubscription(ticket);
+            if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+            if (completionCache[ticket]) delete completionCache[ticket];
+          });
+        } else {
+          console.log(`Completion notification (Twilio not configured) for ${phone}: ${ticket}`);
+          if (dbSub) void dbDeleteSubscription(ticket);
+          if (tokenSubscriptions[ticket]) delete tokenSubscriptions[ticket];
+          if (completionCache[ticket]) delete completionCache[ticket];
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to send completion notification:', e.message);
+    }
   } else if (action === 'requeue') {
     updateQueueTicket(ticket, 'Waiting', 'Unassigned');
     statusMessage = `Ticket ${ticket} has been requeued.`;
@@ -562,4 +904,5 @@ module.exports = {
   server,
   getServerPort: () => PORT,
   getServerUrl: () => `http://localhost:${PORT}`,
+  updateQueueTicket,
 };

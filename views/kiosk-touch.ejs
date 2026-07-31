@@ -18,6 +18,10 @@
               <p class="text-xs uppercase tracking-wide">Issued Ticket</p>
               <p class="text-3xl font-black mt-2"><%= ticketPreview.ticket %></p>
               <p class="text-sm mt-1">Service type: <%= ticketPreview.serviceType %></p>
+              <div class="mt-3 flex items-center gap-3">
+                <a href="/tickets/token/<%= ticketPreview.ticket %>" target="_blank" class="text-sm bg-brand-600 px-3 py-2 rounded-md font-semibold text-white">Open token / QR</a>
+                <a href="/tickets/token/<%= ticketPreview.ticket %>/qr.png" download class="text-sm bg-slate-800 px-3 py-2 rounded-md font-semibold text-slate-200">Download QR</a>
+              </div>
             </div>
           <% } %>
           <% if (error) { %>

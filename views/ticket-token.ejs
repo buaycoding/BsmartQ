@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<%- include('partials/head', { title: title || 'Ticket Token' }) %>
+<body class="flex flex-col min-h-full font-sans antialiased">
+  <%- include('partials/navbar') %>
+  <section class="py-16">
+    <div class="max-w-md mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center">
+        <p class="text-xs text-slate-400 uppercase">Your Ticket</p>
+        <h1 class="text-4xl font-extrabold text-white mt-2"><%= ticket %></h1>
+        <p class="text-sm text-slate-400 mt-1">Status: <span id="ticket-status" class="font-semibold text-slate-200"><%= ticketObj ? ticketObj.status : 'Unknown' %></span></p>
+
+        <div class="mt-6">
+          <% if (qrDataUrl) { %>
+            <img src="<%= qrDataUrl %>" alt="Ticket QR" class="mx-auto w-56 h-56 bg-white p-4 rounded-md">
+          <% } else { %>
+            <div class="mx-auto w-56 h-56 bg-slate-800 rounded-md flex items-center justify-center text-slate-400">QR unavailable</div>
+          <% } %>
+        </div>
+
+        <div class="mt-4 flex justify-center gap-3">
+          <a href="/tickets/token/<%= ticket %>/qr.png" download class="bg-brand-600 px-4 py-2 rounded-md text-white font-semibold">Download QR</a>
+          <a href="/queue/board" class="bg-slate-800 px-4 py-2 rounded-md text-slate-200">Open Queue Board</a>
+        </div>
+
+        <div class="mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-left">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Live queue dashboard</p>
+              <h2 class="mt-1 text-lg font-semibold text-white">Track your turn in real time</h2>
+            </div>
+            <span id="queue-status-pill" class="rounded-full bg-emerald-500/10 px-3 py-1 text-sm font-medium text-emerald-300"><%= queueSnapshot.statusLabel %></span>
+          </div>
+
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+              <p class="text-xs uppercase text-slate-400">Minutes remaining</p>
+              <p id="remaining-minutes" class="mt-2 text-3xl font-bold text-amber-300"><%= queueSnapshot.estimatedWaitLabel %></p>
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+              <p class="text-xs uppercase text-slate-400">Next token</p>
+              <p id="next-token" class="mt-2 text-3xl font-bold text-sky-300"><%= queueSnapshot.nextTicket %></p>
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+              <p class="text-xs uppercase text-slate-400">Your position</p>
+              <p id="ticket-position" class="mt-2 text-2xl font-bold text-white"><%= queueSnapshot.positionLabel %></p>
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+              <p class="text-xs uppercase text-slate-400">Now serving</p>
+              <p id="serving-token" class="mt-2 text-2xl font-bold text-emerald-300"><%= queueSnapshot.currentServingTicket %></p>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <div class="h-2 overflow-hidden rounded-full bg-slate-800">
+              <div id="queue-progress" class="h-full rounded-full bg-gradient-to-r from-brand-500 to-emerald-400" style="width: <%= queueSnapshot.progressPercent %>%;"></div>
+            </div>
+            <p id="queue-progress-text" class="mt-2 text-sm text-slate-400"><%= queueSnapshot.progressText %></p>
+          </div>
+        </div>
+
+        <div class="mt-6 text-left">
+          <p class="text-sm text-slate-400 mb-2">Notify me by SMS when it's my turn</p>
+          <% if (subscribed) { %>
+            <div class="rounded-md bg-emerald-600/10 border border-emerald-500/30 px-3 py-2 text-emerald-300">You've subscribed for notifications.</div>
+          <% } else { %>
+            <form action="/tickets/notify" method="POST" class="space-y-3">
+              <input type="hidden" name="ticket" value="<%= ticket %>">
+              <div>
+                <label class="block text-sm text-slate-300 mb-1">Phone number (E.164 format preferred)</label>
+                <input name="phone" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="+1234567890">
+              </div>
+              <div>
+                <button type="submit" class="w-full bg-emerald-600 px-4 py-2 rounded-md text-white font-semibold">Notify me</button>
+              </div>
+            </form>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </section>
+  <%- include('partials/footer') %>
+  <script>
+    (function() {
+      const ticket = '<%= ticket %>';
+      const statusEl = document.getElementById('ticket-status');
+      const remainingEl = document.getElementById('remaining-minutes');
+      const nextTokenEl = document.getElementById('next-token');
+      const positionEl = document.getElementById('ticket-position');
+      const servingTokenEl = document.getElementById('serving-token');
+      const progressEl = document.getElementById('queue-progress');
+      const progressTextEl = document.getElementById('queue-progress-text');
+      const statusPillEl = document.getElementById('queue-status-pill');
+      let lastStatus = statusEl ? statusEl.textContent.trim() : '';
+
+      function playNotify(message) {
+        if (!('speechSynthesis' in window)) return;
+        const utter = new SpeechSynthesisUtterance(message);
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utter);
+      }
+
+      function renderSnapshot(j) {
+        const s = j.status || 'Unknown';
+        const snapshot = j.queueSnapshot || {};
+        if (statusEl) statusEl.textContent = s;
+        if (remainingEl) remainingEl.textContent = snapshot.estimatedWaitLabel || '—';
+        if (nextTokenEl) nextTokenEl.textContent = snapshot.nextTicket || '—';
+        if (positionEl) positionEl.textContent = snapshot.positionLabel || 'Queued';
+        if (servingTokenEl) servingTokenEl.textContent = snapshot.currentServingTicket || '—';
+        if (progressEl) progressEl.style.width = `${snapshot.progressPercent || 0}%`;
+        if (progressTextEl) progressTextEl.textContent = snapshot.progressText || 'Waiting for queue updates.';
+        if (statusPillEl) {
+          statusPillEl.textContent = snapshot.statusLabel || 'Waiting in queue';
+          statusPillEl.className = 'rounded-full px-3 py-1 text-sm font-medium ' + (
+            s === 'Serving'
+              ? 'bg-emerald-500/10 text-emerald-300'
+              : s === 'Completed'
+                ? 'bg-slate-700 text-slate-200'
+                : 'bg-amber-500/10 text-amber-300'
+          );
+        }
+        if (s !== lastStatus) {
+          if (s === 'Serving') playNotify(`Ticket ${ticket} is now being served.`);
+          if (s === 'Completed') playNotify(`Ticket ${ticket} has been completed.`);
+          lastStatus = s;
+        }
+      }
+
+      async function fetchStatus() {
+        try {
+          const res = await fetch(`/tickets/status/${encodeURIComponent(ticket)}`);
+          if (!res.ok) return;
+          const j = await res.json();
+          renderSnapshot(j);
+        } catch (e) {}
+      }
+
+      if ('EventSource' in window) {
+        const es = new EventSource(`/tickets/stream/${encodeURIComponent(ticket)}`);
+        es.onmessage = function(evt) {
+          try {
+            const j = JSON.parse(evt.data);
+            renderSnapshot(j);
+          } catch (e) {}
+        };
+        es.onerror = function() {
+          es.close();
+        };
+      }
+
+      setInterval(fetchStatus, 4000);
+      fetchStatus();
+    })();
+  </script>
+</body>
+</html>

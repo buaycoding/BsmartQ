@@ -10,23 +10,15 @@ services:
       - key: NODE_ENV
         value: production
       - key: DB_HOST
-        fromDatabase:
-          name: bsmartq-db
-          property: host
+        value: dpg-d9mcdr2jobas73aoogqg-a.ohio-postgres.render.com
       - key: DB_PORT
         value: "5432"
       - key: DB_NAME
-        fromDatabase:
-          name: bsmartq-db
-          property: database
+        value: bsmartq_database
       - key: DB_USER
-        fromDatabase:
-          name: bsmartq-db
-          property: user
+        value: bsmartq_database_user
       - key: DB_PASSWORD
-        fromDatabase:
-          name: bsmartq-db
-          property: password
+        value: SqOQK91PRRrW3YxUTEcp9ibwqbhVQh3n
       - key: DB_SSL
         value: "true"
       - key: PORT
@@ -39,8 +31,3 @@ services:
         value: Main Downtown Branch
       - key: JWT_SECRET
         sync: false
-
-databases:
-  - name: bsmartq-db
-    plan: standard
-    postgresVersion: "15"

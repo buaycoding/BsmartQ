@@ -939,30 +939,38 @@ router.post('/subscription/request', requireAuth, async (req, res) => {
       console.warn('Subscription approval email failed:', emailError.message);
     }
 
+    const plan = String(result?.plan || req.user?.subscription_plan || 'free').toLowerCase();
+    const paymentStatus = String(result?.status || req.user?.subscription_status || 'pending').toLowerCase();
+    const hasPaidAccess = ['1-day', '1-month', '3-months', '1-year'].includes(plan) && ['paid', 'active'].includes(paymentStatus);
+
     return res.render('dashboard', {
       title: 'BsmartQ | Dashboard',
       user: req.user,
       error: null,
       notice: result.message,
       inviteMembers: members,
-      plan: result.plan,
-      paymentStatus: result.status,
-      hasPaidAccess: false,
+      plan,
+      paymentStatus,
+      hasPaidAccess,
     });
   } catch (error) {
     const members = await listWorkspaceMembers(
       req.user?.tenant_id || req.user?.tenantId,
       req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
     );
+    const plan = String(req.user?.subscription_plan || 'free').toLowerCase();
+    const paymentStatus = String(req.user?.subscription_status || 'pending').toLowerCase();
+    const hasPaidAccess = ['1-day', '1-month', '3-months', '1-year'].includes(plan) && ['paid', 'active'].includes(paymentStatus);
+
     return res.render('dashboard', {
       title: 'BsmartQ | Dashboard',
       user: req.user,
       error: error.message,
       notice: null,
       inviteMembers: members,
-      plan: String(req.user?.subscription_plan || 'free').toLowerCase(),
-      paymentStatus: String(req.user?.subscription_status || 'pending').toLowerCase(),
-      hasPaidAccess: false,
+      plan,
+      paymentStatus,
+      hasPaidAccess,
     });
   }
 });
@@ -980,6 +988,9 @@ router.post('/invite', requireAuth, async (req, res) => {
       req.user?.tenant_id || req.user?.tenantId,
       req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
     );
+    const plan = String(req.user?.subscription_plan || 'free').toLowerCase();
+    const paymentStatus = String(req.user?.subscription_status || 'pending').toLowerCase();
+    const hasPaidAccess = ['1-day', '1-month', '3-months', '1-year'].includes(plan) && ['paid', 'active'].includes(paymentStatus);
 
     try {
       await sendEmailNotification({
@@ -997,18 +1008,27 @@ router.post('/invite', requireAuth, async (req, res) => {
       error: null,
       notice: `Invited ${result.user.name} to your workspace. They can sign in immediately. Temporary password: ${result.temporaryPassword}`,
       inviteMembers: members,
+      plan,
+      paymentStatus,
+      hasPaidAccess,
     });
   } catch (error) {
     const members = await listWorkspaceMembers(
       req.user?.tenant_id || req.user?.tenantId,
       req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
     );
+    const plan = String(req.user?.subscription_plan || 'free').toLowerCase();
+    const paymentStatus = String(req.user?.subscription_status || 'pending').toLowerCase();
+    const hasPaidAccess = ['1-day', '1-month', '3-months', '1-year'].includes(plan) && ['paid', 'active'].includes(paymentStatus);
     return res.render('dashboard', {
       title: 'BsmartQ | Dashboard',
       user: req.user,
       error: error.message,
       notice: null,
       inviteMembers: members,
+      plan,
+      paymentStatus,
+      hasPaidAccess,
     });
   }
 });

@@ -12,7 +12,8 @@
             <span>Authenticated Workspace</span>
           </div>
           <p class="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-brand-400">Company Workspace</p>
-          <h1 class="mt-2 text-4xl font-extrabold text-white"><%= user.organizationName || user.name %></h1>
+          <p class="mt-2 text-sm font-medium uppercase tracking-[0.2em] text-slate-500">Organization</p>
+          <h1 class="mt-1 text-3xl font-extrabold text-white"><%= user.organizationName || user.name %></h1>
           <p class="text-slate-400 mt-2">Operator: <%= user.name %> • Role: <%= user.role %> • Workspace: <%= user.tenantName || user.organizationName || user.tenantId %></p>
         </div>
         <a href="/logout" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-5 py-3 rounded-lg border border-slate-700 transition">Logout</a>
@@ -51,32 +52,36 @@
         <div class="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
           Send your payment to <span class="font-semibold text-white">0769356930</span> for activation.
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+        <form action="/subscription/request" method="POST" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <button type="submit" name="plan" value="1-day" class="rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-left transition hover:border-brand-500 hover:bg-slate-900">
             <p class="text-sm font-semibold text-brand-400">Mobile money plan</p>
             <p class="mt-2 text-2xl font-bold text-white">1 day</p>
             <p class="mt-2 text-sm font-semibold <%= plan === '1-day' && paymentStatus === 'paid' ? 'text-emerald-300' : 'text-slate-400' %>">Trial access</p>
             <p class="mt-2 text-sm text-slate-400">Short trial access for quick setup and testing.</p>
-          </div>
-          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+            <p class="mt-3 text-sm font-semibold text-emerald-300">Free • pending approval</p>
+          </button>
+          <button type="submit" name="plan" value="1-month" class="rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-left transition hover:border-brand-500 hover:bg-slate-900">
             <p class="text-sm font-semibold text-brand-400">Mobile money plan</p>
             <p class="mt-2 text-2xl font-bold text-white">1 month</p>
             <p class="mt-2 text-sm font-semibold <%= plan === '1-month' && paymentStatus === 'paid' ? 'text-emerald-300' : 'text-slate-400' %>">Daily operations</p>
             <p class="mt-2 text-sm text-slate-400">Ideal for lightweight daily operations.</p>
-          </div>
-          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+            <p class="mt-3 text-sm font-semibold text-amber-300">50 USD • pending approval</p>
+          </button>
+          <button type="submit" name="plan" value="3-months" class="rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-left transition hover:border-brand-500 hover:bg-slate-900">
             <p class="text-sm font-semibold text-brand-400">Mobile money plan</p>
             <p class="mt-2 text-2xl font-bold text-white">3 months</p>
             <p class="mt-2 text-sm font-semibold <%= plan === '3-months' && paymentStatus === 'paid' ? 'text-emerald-300' : 'text-slate-400' %>">Extended deployment</p>
             <p class="mt-2 text-sm text-slate-400">Great for longer-term pilot deployments.</p>
-          </div>
-          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+            <p class="mt-3 text-sm font-semibold text-amber-300">150 USD • pending approval</p>
+          </button>
+          <button type="submit" name="plan" value="1-year" class="rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-left transition hover:border-brand-500 hover:bg-slate-900">
             <p class="text-sm font-semibold text-brand-400">Mobile money plan</p>
             <p class="mt-2 text-2xl font-bold text-white">1 year</p>
             <p class="mt-2 text-sm font-semibold <%= plan === '1-year' && paymentStatus === 'paid' ? 'text-emerald-300' : 'text-slate-400' %>">Full rollout</p>
             <p class="mt-2 text-sm text-slate-400">Best for long-running branch operations.</p>
-          </div>
-        </div>
+            <p class="mt-3 text-sm font-semibold text-amber-300">500 USD • pending approval</p>
+          </button>
+        </form>
         <div class="mt-5 rounded-lg border <%= hasPaidAccess ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950/70 text-slate-300' %> px-4 py-3 text-sm">
           <% if (hasPaidAccess) { %>
             Your organisation has paid access and can use the full workspace features for the selected package.
@@ -90,8 +95,8 @@
         <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl shadow-slate-950/40">
           <div class="flex items-center justify-between mb-4">
             <div>
-              <p class="text-xs uppercase tracking-[0.24em] text-brand-400">Invite Counter Team</p>
-              <h2 class="text-xl font-bold text-white">Add staff who can view and update queue data</h2>
+              <p class="text-xs uppercase tracking-[0.24em] text-brand-400">Invite workspace users</p>
+              <h2 class="text-xl font-bold text-white">Add staff or clients and let them register with approval</h2>
             </div>
           </div>
           <form action="/invite" method="POST" class="space-y-4">
@@ -110,9 +115,10 @@
               <select name="role" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:outline-none focus:border-brand-500">
                 <option value="counter">Counter Staff</option>
                 <option value="staff">General Staff</option>
+                <option value="client">Client</option>
               </select>
             </div>
-            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold px-4 py-3 rounded-lg transition">Invite Team Member</button>
+            <button type="submit" class="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold px-4 py-3 rounded-lg transition">Send invite</button>
           </form>
         </div>
 
@@ -128,7 +134,10 @@
                       <p class="font-semibold text-white"><%= member.name %></p>
                       <p class="text-sm text-slate-400"><%= member.email %></p>
                     </div>
-                    <span class="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300"><%= member.role %></span>
+                    <div class="text-right">
+                      <span class="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300"><%= member.role %></span>
+                      <p class="mt-1 text-xs <%= member.is_approved === false ? 'text-amber-300' : 'text-emerald-300' %>"><%= member.is_approved === false ? 'Pending approval' : 'Active' %></p>
+                    </div>
                   </div>
                 </div>
               <% }); %>

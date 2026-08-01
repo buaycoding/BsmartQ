@@ -1,7 +1,18 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { sendEmailNotification } = require('../lib/notifications');
+const {
+  sendEmailNotification,
+  sendBookingEmail,
+  sendBookingConfirmationEmail,
+  sendAppointmentReminderEmail,
+  sendQueueUpdateEmail,
+  sendPaymentReceiptEmail,
+  sendPasswordResetEmail,
+  sendBookingConfirmationSms,
+  sendAppointmentReminderSms,
+  sendPaymentConfirmationSms,
+} = require('../lib/notifications');
 
 const router = express.Router();
 const COOKIE_NAME = 'bsmartq_session';
@@ -10,6 +21,19 @@ const ADMIN_EMAIL = 'buay@admin.com';
 const ADMIN_PASSWORD = 'buay102026';
 
 let dbPool = null;
+
+const clientDashboardState = {
+  bookings: [],
+  preferences: {
+    email: true,
+    sms: true,
+    reminders: true,
+  },
+  notifications: [
+    { id: 1, title: 'Queue update', body: 'Your truck is now 2 slots away.', unread: true },
+    { id: 2, title: 'Booking reminder', body: 'Your next booking is tomorrow at 09:00.', unread: false },
+  ],
+};
 
 // Initialize auth module with database pool
 function initializeAuth(pool) {
@@ -181,7 +205,9 @@ async function createWorkspaceInvite({ inviter, email, name, role = 'counter' })
   }
 
   const normalizedEmail = normalizeEmail(email);
-  const normalizedRole = ['counter', 'staff'].includes(String(role).toLowerCase()) ? String(role).toLowerCase() : 'counter';
+  const requestedRole = String(role || '').trim().toLowerCase();
+  const normalizedRole = ['counter', 'staff', 'client'].includes(requestedRole) ? requestedRole : 'counter';
+  const isClientInvite = normalizedRole === 'client';
 
   if (!normalizedEmail || !String(name || '').trim()) {
     throw new Error('Please provide the team member name and email address.');
@@ -191,13 +217,39 @@ async function createWorkspaceInvite({ inviter, email, name, role = 'counter' })
     throw new Error('The admin account is reserved for system use only.');
   }
 
-  // Check if user exists
   const existingUser = await dbPool.query(
-    'SELECT id FROM users WHERE email = $1',
+    'SELECT * FROM users WHERE email = $1',
     [normalizedEmail]
   );
 
   if (existingUser.rows.length > 0) {
+    const existing = existingUser.rows[0];
+    if (existing.is_deleted) {
+      const temporaryPassword = generateTemporaryPassword();
+      const restored = await dbPool.query(
+        `UPDATE users
+         SET name = $2,
+             password = $3,
+             role = $4,
+             tenant_id = $5,
+             tenant_name = $6,
+             branch_id = $7,
+             organization_name = $8,
+             invited_by = $9,
+             is_active = TRUE,
+             is_approved = CASE WHEN $13 THEN FALSE ELSE TRUE END,
+             is_deleted = FALSE,
+             subscription_plan = COALESCE($10, 'free'),
+             subscription_status = COALESCE($11, 'pending'),
+             organization_status = COALESCE($12, 'active'),
+             updated_at = NOW()
+         WHERE email = $1
+         RETURNING *`,
+        [normalizedEmail, String(name).trim(), bcrypt.hashSync(temporaryPassword, 12), normalizedRole, inviter.tenant_id || 'tenant-default-001', inviter.tenant_name || inviter.organizationName || 'Workspace', inviter.branch_id || 'branch-main-downtown', inviter.organizationName || inviter.tenant_name || 'Workspace', inviter.email, 'free', 'pending', 'active', isClientInvite]
+      );
+      return { user: restored.rows[0], temporaryPassword };
+    }
+
     throw new Error('An account with this email already exists.');
   }
 
@@ -219,8 +271,8 @@ async function createWorkspaceInvite({ inviter, email, name, role = 'counter' })
       inviter.branch_id || 'branch-main-downtown',
       inviter.organizationName || inviter.tenant_name || 'Workspace',
       inviter.email,
-      false,
-      false,
+      true,
+      !isClientInvite,
     ]
   );
 
@@ -228,16 +280,32 @@ async function createWorkspaceInvite({ inviter, email, name, role = 'counter' })
   return { user: invitedUser, temporaryPassword };
 }
 
-async function listWorkspaceMembers(tenantId) {
+async function listWorkspaceMembers(tenantId, organizationName = '') {
   if (!dbPool) {
     return [];
   }
 
-  const result = await dbPool.query(
-    'SELECT id, name, email, role, is_active, is_approved, created_at FROM users WHERE tenant_id = $1 ORDER BY created_at DESC',
-    [tenantId]
-  );
+  const normalizedTenantId = String(tenantId || '').trim();
+  const normalizedOrganizationName = String(organizationName || '').trim();
 
+  let query = `
+    SELECT id, name, email, role, is_active, is_approved, created_at, tenant_id, tenant_name, organization_name
+    FROM users
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  `;
+  let values = [];
+
+  if (normalizedTenantId) {
+    query += ` AND tenant_id = $1`;
+    values = [normalizedTenantId];
+  } else if (normalizedOrganizationName) {
+    query += ` AND (organization_name = $1 OR tenant_name = $1)`;
+    values = [normalizedOrganizationName];
+  }
+
+  query += ` ORDER BY created_at DESC`;
+
+  const result = await dbPool.query(query, values);
   return result.rows;
 }
 
@@ -254,6 +322,45 @@ async function listOrganizationsForAdmin() {
   );
 
   return result.rows;
+}
+
+async function requestSubscriptionPlan({ user, plan }) {
+  if (!dbPool) {
+    throw new Error('Database not initialized');
+  }
+
+  const normalizedPlan = String(plan || 'free').trim().toLowerCase();
+  const allowedPlans = {
+    free: 0,
+    '1-day': 0,
+    '1-month': 50,
+    '3-months': 150,
+    '1-year': 500,
+  };
+
+  const amountUsd = allowedPlans[normalizedPlan] ?? 0;
+  const status = amountUsd > 0 ? 'pending' : 'active';
+
+  const result = await dbPool.query(
+    `UPDATE users
+     SET subscription_plan = $2,
+         subscription_status = $3,
+         is_active = TRUE,
+         is_approved = COALESCE(is_approved, TRUE),
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, email, name, subscription_plan, subscription_status, organization_name, tenant_name` ,
+    [user?.id, normalizedPlan, status]
+  );
+
+  const updatedUser = result.rows[0] || null;
+  return {
+    user: updatedUser,
+    plan: normalizedPlan,
+    status,
+    amountUsd,
+    message: amountUsd > 0 ? `Subscription request for ${normalizedPlan} submitted. Please pay ${amountUsd} USD via mobile money.` : 'Subscription updated to free plan.',
+  };
 }
 
 async function resetAuthStore() {
@@ -287,6 +394,44 @@ async function resetAuthStore() {
   } catch (error) {
     console.error('❌ Failed to reset auth store:', error.message);
   }
+}
+
+function createClientBooking({ user, booking }) {
+  const newBooking = {
+    id: `booking-${Date.now()}`,
+    customerName: user?.name || 'Client',
+    serviceType: String(booking?.serviceType || 'Truck service').trim(),
+    bookingDate: String(booking?.bookingDate || new Date().toISOString().slice(0, 10)).trim(),
+    bookingTime: String(booking?.bookingTime || '09:00').trim(),
+    vehicleType: String(booking?.vehicleType || 'Truck').trim(),
+    notes: String(booking?.notes || '').trim(),
+    createdAt: new Date().toISOString(),
+  };
+
+  clientDashboardState.bookings.unshift(newBooking);
+  return newBooking;
+}
+
+function getClientDashboardData(user) {
+  return {
+    bookings: clientDashboardState.bookings,
+    preferences: clientDashboardState.preferences,
+    notifications: clientDashboardState.notifications,
+    queueInfo: {
+      currentQueue: 'T-104',
+      nextSlot: '2 slots away',
+      estimatedWait: '18 min',
+    },
+    user,
+  };
+}
+
+function updateClientPreferences({ preferences }) {
+  clientDashboardState.preferences = {
+    ...clientDashboardState.preferences,
+    ...preferences,
+  };
+  return clientDashboardState.preferences;
 }
 
 function parseCookies(headerValue = '') {
@@ -542,13 +687,39 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    // Check if user already exists
     const existingUser = await dbPool.query(
-      'SELECT id FROM users WHERE email = $1',
+      'SELECT * FROM users WHERE email = $1',
       [normalizedEmail]
     );
 
     if (existingUser.rows.length > 0) {
+      const existing = existingUser.rows[0];
+      if (existing.is_deleted) {
+        const restoredPassword = await bcrypt.hash(password, 12);
+        const invitedRole = String(existing.role || '').trim().toLowerCase();
+        const shouldRequireApproval = invitedRole === 'client' || existing.is_approved === false;
+        await dbPool.query(
+          `UPDATE users
+           SET name = $2,
+               password = $3,
+               role = COALESCE(NULLIF($4, ''), 'staff'),
+               tenant_id = COALESCE(NULLIF($5, ''), 'tenant-default-001'),
+               tenant_name = $6,
+               branch_id = COALESCE(NULLIF($7, ''), 'branch-main-downtown'),
+               organization_name = $8,
+               is_active = TRUE,
+               is_approved = $9,
+               is_deleted = FALSE,
+               subscription_plan = 'free',
+               subscription_status = 'pending',
+               organization_status = 'active',
+               updated_at = NOW()
+           WHERE email = $1`,
+          [normalizedEmail, String(name).trim(), restoredPassword, invitedRole || 'staff', 'tenant-default-001', organizationName, 'branch-main-downtown', organizationName, shouldRequireApproval ? false : true]
+        );
+        return res.redirect('/login?registered=1');
+      }
+
       return res.status(409).render('auth/register', {
         title: 'BsmartQ | Create Account',
         error: 'An account with this email already exists.',
@@ -556,7 +727,6 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Create new user
     const hashedPassword = await bcrypt.hash(password, 12);
     const userId = `user-${Date.now()}`;
 
@@ -602,6 +772,201 @@ router.post('/register', async (req, res) => {
   }
 });
 
+router.post('/notifications/booking', requireAuth, async (req, res) => {
+  try {
+    await sendBookingEmail({
+      to: req.body?.email || req.user?.email,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      serviceName: req.body?.serviceName || 'service',
+      bookingTime: req.body?.bookingTime || 'soon',
+      reference: req.body?.reference || `BK-${Date.now()}`,
+    });
+
+    return res.json({ ok: true, message: 'Booking notification sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/booking-confirmation', requireAuth, async (req, res) => {
+  try {
+    await sendBookingConfirmationEmail({
+      to: req.body?.email || req.user?.email,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      serviceName: req.body?.serviceName || 'service',
+      bookingTime: req.body?.bookingTime || 'soon',
+      reference: req.body?.reference || `BK-${Date.now()}`,
+    });
+
+    return res.json({ ok: true, message: 'Booking confirmation sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/reminder', requireAuth, async (req, res) => {
+  try {
+    await sendAppointmentReminderEmail({
+      to: req.body?.email || req.user?.email,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      serviceName: req.body?.serviceName || 'service',
+      bookingTime: req.body?.bookingTime || 'soon',
+      reference: req.body?.reference || `BK-${Date.now()}`,
+    });
+
+    return res.json({ ok: true, message: 'Appointment reminder sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/queue-update', requireAuth, async (req, res) => {
+  try {
+    await sendQueueUpdateEmail({
+      to: req.body?.email || req.user?.email,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      queueNumber: req.body?.queueNumber || 'N/A',
+      branchName: req.body?.branchName || 'Main Branch',
+    });
+
+    return res.json({ ok: true, message: 'Queue update email sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/payment-receipt', requireAuth, async (req, res) => {
+  try {
+    await sendPaymentReceiptEmail({
+      to: req.body?.email || req.user?.email,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      amountUsd: req.body?.amountUsd || '0',
+      planName: req.body?.planName || 'plan',
+      reference: req.body?.reference || `PAY-${Date.now()}`,
+    });
+
+    return res.json({ ok: true, message: 'Payment receipt sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/password-reset', requireAuth, async (req, res) => {
+  try {
+    await sendPasswordResetEmail({
+      to: req.body?.email || req.user?.email,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      resetLink: req.body?.resetLink || 'https://bsmartq.app/reset-password',
+    });
+
+    return res.json({ ok: true, message: 'Password reset email sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/sms/booking-confirmation', requireAuth, async (req, res) => {
+  try {
+    await sendBookingConfirmationSms({
+      twilioClient: req.app.locals.twilioClient || null,
+      to: req.body?.phone || req.body?.to,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      serviceName: req.body?.serviceName || 'service',
+      bookingTime: req.body?.bookingTime || 'soon',
+      reference: req.body?.reference || `BK-${Date.now()}`,
+    });
+
+    return res.json({ ok: true, message: 'Booking confirmation SMS sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/sms/reminder', requireAuth, async (req, res) => {
+  try {
+    await sendAppointmentReminderSms({
+      twilioClient: req.app.locals.twilioClient || null,
+      to: req.body?.phone || req.body?.to,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      serviceName: req.body?.serviceName || 'service',
+      bookingTime: req.body?.bookingTime || 'soon',
+      reference: req.body?.reference || `BK-${Date.now()}`,
+    });
+
+    return res.json({ ok: true, message: 'Appointment reminder SMS sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/notifications/sms/payment-confirmation', requireAuth, async (req, res) => {
+  try {
+    await sendPaymentConfirmationSms({
+      twilioClient: req.app.locals.twilioClient || null,
+      to: req.body?.phone || req.body?.to,
+      customerName: req.body?.customerName || req.user?.name || 'Customer',
+      amountUsd: req.body?.amountUsd || '0',
+      planName: req.body?.planName || 'plan',
+      reference: req.body?.reference || `PAY-${Date.now()}`,
+    });
+
+    return res.json({ ok: true, message: 'Payment confirmation SMS sent.' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/subscription/request', requireAuth, async (req, res) => {
+  try {
+    const requestedPlan = String(req.body?.plan || 'free').trim().toLowerCase();
+    const result = await requestSubscriptionPlan({
+      user: req.user,
+      plan: requestedPlan,
+    });
+
+    const members = await listWorkspaceMembers(
+      req.user?.tenant_id || req.user?.tenantId,
+      req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
+    );
+
+    try {
+      await sendEmailNotification({
+        to: 'buay@admin.com',
+        subject: 'New subscription request',
+        text: `${req.user?.name || 'An organization'} requested the ${result.plan} subscription plan for ${req.user?.organizationName || req.user?.tenant_name || 'their workspace'}. Amount: ${result.amountUsd} USD. Please review and approve it.`,
+      });
+    } catch (emailError) {
+      console.warn('Subscription approval email failed:', emailError.message);
+    }
+
+    return res.render('dashboard', {
+      title: 'BsmartQ | Dashboard',
+      user: req.user,
+      error: null,
+      notice: result.message,
+      inviteMembers: members,
+      plan: result.plan,
+      paymentStatus: result.status,
+      hasPaidAccess: false,
+    });
+  } catch (error) {
+    const members = await listWorkspaceMembers(
+      req.user?.tenant_id || req.user?.tenantId,
+      req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
+    );
+    return res.render('dashboard', {
+      title: 'BsmartQ | Dashboard',
+      user: req.user,
+      error: error.message,
+      notice: null,
+      inviteMembers: members,
+      plan: String(req.user?.subscription_plan || 'free').toLowerCase(),
+      paymentStatus: String(req.user?.subscription_status || 'pending').toLowerCase(),
+      hasPaidAccess: false,
+    });
+  }
+});
+
 router.post('/invite', requireAuth, async (req, res) => {
   try {
     const result = await createWorkspaceInvite({
@@ -611,13 +976,16 @@ router.post('/invite', requireAuth, async (req, res) => {
       role: req.body?.role,
     });
 
-    const members = await listWorkspaceMembers(req.user.tenant_id);
+    const members = await listWorkspaceMembers(
+      req.user?.tenant_id || req.user?.tenantId,
+      req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
+    );
 
     try {
       await sendEmailNotification({
         to: result.user.email,
         subject: 'You have been invited to BsmartQ',
-        text: `Hello ${result.user.name}, you have been invited to join the BsmartQ workspace as ${result.user.role}. Your temporary password is ${result.temporaryPassword}. Please sign in and wait for admin approval.`,
+        text: `Hello ${result.user.name}, you have been invited to join the BsmartQ workspace as ${result.user.role}. Your temporary password is ${result.temporaryPassword}. You can sign in immediately.`,
       });
     } catch (emailError) {
       console.warn('Invite email failed:', emailError.message);
@@ -627,11 +995,14 @@ router.post('/invite', requireAuth, async (req, res) => {
       title: 'BsmartQ | Dashboard',
       user: req.user,
       error: null,
-      notice: `Invited ${result.user.name} to your workspace. They will receive an email and must wait for admin approval. Temporary password: ${result.temporaryPassword}`,
+      notice: `Invited ${result.user.name} to your workspace. They can sign in immediately. Temporary password: ${result.temporaryPassword}`,
       inviteMembers: members,
     });
   } catch (error) {
-    const members = await listWorkspaceMembers(req.user.tenant_id);
+    const members = await listWorkspaceMembers(
+      req.user?.tenant_id || req.user?.tenantId,
+      req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
+    );
     return res.render('dashboard', {
       title: 'BsmartQ | Dashboard',
       user: req.user,
@@ -647,12 +1018,59 @@ router.get('/logout', (req, res) => {
   res.redirect('/login');
 });
 
+router.get('/client/dashboard', requireAuth, async (req, res) => {
+  if (req.user && String(req.user.role || '').toLowerCase() === 'admin') {
+    return res.redirect('/admin');
+  }
+
+  const clientData = getClientDashboardData(req.user);
+  res.render('client-dashboard', {
+    title: 'BsmartQ | Client Dashboard',
+    user: req.user,
+    error: null,
+    notice: req.query?.notice || null,
+    ...clientData,
+  });
+});
+
+router.post('/client/bookings', requireAuth, async (req, res) => {
+  try {
+    const booking = createClientBooking({
+      user: req.user,
+      booking: req.body,
+    });
+
+    return res.redirect('/client/dashboard?notice=' + encodeURIComponent(`Booking created for ${booking.serviceType} on ${booking.bookingDate} at ${booking.bookingTime}.`));
+  } catch (error) {
+    return res.redirect('/client/dashboard?notice=' + encodeURIComponent(error.message));
+  }
+});
+
+router.post('/client/settings', requireAuth, async (req, res) => {
+  try {
+    updateClientPreferences({
+      preferences: {
+        email: req.body?.email === 'on',
+        sms: req.body?.sms === 'on',
+        reminders: req.body?.reminders === 'on',
+      },
+    });
+
+    return res.redirect('/client/dashboard?notice=' + encodeURIComponent('Your notification settings were updated.'));
+  } catch (error) {
+    return res.redirect('/client/dashboard?notice=' + encodeURIComponent(error.message));
+  }
+});
+
 router.get('/dashboard', requireAuth, async (req, res) => {
   if (req.user && String(req.user.role || '').toLowerCase() === 'admin') {
     return res.redirect('/admin');
   }
 
-  const members = await listWorkspaceMembers(req.user.tenant_id);
+  const members = await listWorkspaceMembers(
+    req.user?.tenant_id || req.user?.tenantId,
+    req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || req.user?.tenantName || ''
+  );
   const plan = String(req.user?.subscription_plan || 'free').toLowerCase();
   const paymentStatus = String(req.user?.subscription_status || 'pending').toLowerCase();
   const hasPaidAccess = ['1-day', '1-month', '3-months', '1-year'].includes(plan) && ['paid', 'active'].includes(paymentStatus);
@@ -762,6 +1180,10 @@ module.exports = {
   requireAuth,
   requireRole,
   createWorkspaceInvite,
+  requestSubscriptionPlan,
   listWorkspaceMembers,
+  createClientBooking,
+  getClientDashboardData,
+  updateClientPreferences,
   resetAuthStore,
 };

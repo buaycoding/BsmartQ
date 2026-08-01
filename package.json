@@ -5,6 +5,7 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "node app.js",
+    "test": "node --test",
     "desktop": "electron .",
     "desktop:dev": "concurrently \"npm run start\" \"wait-on http://localhost:3000 && electron .\"",
     "dev": "node app.js",
@@ -35,9 +36,9 @@
     "helmet": "^8.0.0",
     "morgan": "^1.10.0",
     "nodemailer": "^7.0.0",
-    "pg": "^8.12.1"
-    ,
+    "pg": "^8.12.1",
     "qrcode": "^1.5.1",
+    "resend": "^6.18.1",
     "twilio": "^4.10.0"
   },
   "devDependencies": {

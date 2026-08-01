@@ -9,6 +9,9 @@ const {
   sendQueueUpdateEmail,
   sendPaymentReceiptEmail,
   sendPasswordResetEmail,
+  sendCustomerInvitationEmail,
+  sendStaffInvitationEmail,
+  sendEmailVerificationEmail,
   sendBookingConfirmationSms,
   sendAppointmentReminderSms,
   sendPaymentConfirmationSms,
@@ -753,10 +756,10 @@ router.post('/register', async (req, res) => {
 
     let emailNotice = null;
     try {
-      const emailResult = await sendEmailNotification({
+      const emailResult = await sendEmailVerificationEmail({
         to: normalizedEmail,
-        subject: 'BsmartQ account pending approval',
-        text: `Hello ${name}, your BsmartQ workspace account has been created and is pending admin approval. Once approved you can sign in and use the queue tools.`,
+        customerName: name,
+        verifyLink: `https://bsmartq.app/verify?email=${encodeURIComponent(normalizedEmail)}`,
       });
       if (!emailResult?.ok) {
         emailNotice = 'Account created, but email delivery is not configured yet. Please contact the organization admin for access details.';
@@ -939,6 +942,16 @@ router.post('/subscription/request', requireAuth, async (req, res) => {
     );
 
     try {
+      if (result?.amountUsd > 0) {
+        await sendPaymentReceiptEmail({
+          to: req.user?.email,
+          customerName: req.user?.name || 'Customer',
+          amountUsd: result.amountUsd,
+          planName: result.plan,
+          reference: `SUB-${Date.now()}`,
+        });
+      }
+
       await sendEmailNotification({
         to: 'buay@admin.com',
         subject: 'New subscription request',
@@ -1003,11 +1016,20 @@ router.post('/invite', requireAuth, async (req, res) => {
 
     let emailNotice = null;
     try {
-      const emailResult = await sendEmailNotification({
-        to: result.user.email,
-        subject: 'You have been invited to BsmartQ',
-        text: `Hello ${result.user.name}, you have been invited to join the BsmartQ workspace as ${result.user.role}. Your temporary password is ${result.temporaryPassword}. You can sign in immediately.`,
-      });
+      const emailResult = result.user.role === 'client'
+        ? await sendCustomerInvitationEmail({
+            to: result.user.email,
+            customerName: result.user.name,
+            inviteUrl: `https://bsmartq.app/invite?email=${encodeURIComponent(result.user.email)}`,
+            workspaceName: req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || 'BsmartQ',
+          })
+        : await sendStaffInvitationEmail({
+            to: result.user.email,
+            staffName: result.user.name,
+            inviteUrl: `https://bsmartq.app/invite?email=${encodeURIComponent(result.user.email)}`,
+            workspaceName: req.user?.organization_name || req.user?.organizationName || req.user?.tenant_name || 'BsmartQ',
+            temporaryPassword: result.temporaryPassword,
+          });
       if (!emailResult?.ok) {
         emailNotice = 'Invitation saved, but the email could not be delivered because no mail provider is configured.';
       }

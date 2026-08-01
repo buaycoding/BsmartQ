@@ -21,7 +21,7 @@ const {
   initializeAuth,
   initializeAuthTable 
 } = require('./routes/auth');
-const { sendSmsNotification } = require('./lib/notifications');
+const { sendSmsNotification, configureEmailService } = require('./lib/notifications');
 const dotenv = require('dotenv');
 
 function loadEnvFiles() {
@@ -205,6 +205,8 @@ async function connectToDatabase() {
 
     // Initialize auth table and seed admin user
     await initializeAuthTable();
+    configureEmailService({ dbPool });
+    await configureEmailService({ dbPool }).ensureNotificationsTable();
 
     dbStatus = { connected: true, error: null };
     systemMode = 'ONLINE';

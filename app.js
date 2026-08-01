@@ -205,8 +205,8 @@ async function connectToDatabase() {
 
     // Initialize auth table and seed admin user
     await initializeAuthTable();
-    configureEmailService({ dbPool });
-    await configureEmailService({ dbPool }).ensureNotificationsTable();
+    const emailService = configureEmailService({ dbPool });
+    await emailService.ensureNotificationsTable();
 
     dbStatus = { connected: true, error: null };
     systemMode = 'ONLINE';

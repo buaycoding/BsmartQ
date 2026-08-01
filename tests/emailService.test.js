@@ -2,6 +2,22 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createEmailService } = require('../lib/emailService');
 
+test('setDbPool updates the database target without throwing', async () => {
+  const queries = [];
+  const fakeDbPool = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+
+  const service = createEmailService();
+  service.setDbPool(fakeDbPool);
+  await service.ensureNotificationsTable();
+
+  assert.ok(queries.some((entry) => String(entry.sql).includes('CREATE TABLE IF NOT EXISTS notifications')));
+});
+
 test('retries delivery and logs the email', async () => {
   const queries = [];
   const fakeDbPool = {

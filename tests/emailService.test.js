@@ -18,6 +18,30 @@ test('setDbPool updates the database target without throwing', async () => {
   assert.ok(queries.some((entry) => String(entry.sql).includes('CREATE TABLE IF NOT EXISTS notifications')));
 });
 
+test('uses environment variables loaded after service creation', async () => {
+  const queries = [];
+  const fakeDbPool = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+
+  const service = createEmailService({ dbPool: fakeDbPool, transport: async (payload) => ({ ok: true, data: { id: 'msg_456' }, payload }) });
+  process.env.RESEND_API_KEY = 'test-key';
+  process.env.RESEND_FROM = 'Support <support@example.com>';
+
+  const result = await service.sendEmail({
+    to: 'client@example.com',
+    subject: 'Environment test',
+    text: 'Hello',
+    category: 'test',
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(queries.some((entry) => String(entry.sql).includes('INSERT INTO notifications')));
+});
+
 test('retries delivery and logs the email', async () => {
   const queries = [];
   const fakeDbPool = {

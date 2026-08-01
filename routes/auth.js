@@ -751,14 +751,23 @@ router.post('/register', async (req, res) => {
       ]
     );
 
+    let emailNotice = null;
     try {
-      await sendEmailNotification({
+      const emailResult = await sendEmailNotification({
         to: normalizedEmail,
         subject: 'BsmartQ account pending approval',
         text: `Hello ${name}, your BsmartQ workspace account has been created and is pending admin approval. Once approved you can sign in and use the queue tools.`,
       });
+      if (!emailResult?.ok) {
+        emailNotice = 'Account created, but email delivery is not configured yet. Please contact the organization admin for access details.';
+      }
     } catch (emailError) {
       console.warn('Registration email failed:', emailError.message);
+      emailNotice = 'Account created, but email delivery is not configured yet. Please contact the organization admin for access details.';
+    }
+
+    if (emailNotice) {
+      return res.redirect(`/login?registered=1&notice=${encodeURIComponent(emailNotice)}`);
     }
 
     res.redirect('/login?registered=1');
@@ -992,21 +1001,26 @@ router.post('/invite', requireAuth, async (req, res) => {
     const paymentStatus = String(req.user?.subscription_status || 'pending').toLowerCase();
     const hasPaidAccess = ['1-day', '1-month', '3-months', '1-year'].includes(plan) && ['paid', 'active'].includes(paymentStatus);
 
+    let emailNotice = null;
     try {
-      await sendEmailNotification({
+      const emailResult = await sendEmailNotification({
         to: result.user.email,
         subject: 'You have been invited to BsmartQ',
         text: `Hello ${result.user.name}, you have been invited to join the BsmartQ workspace as ${result.user.role}. Your temporary password is ${result.temporaryPassword}. You can sign in immediately.`,
       });
+      if (!emailResult?.ok) {
+        emailNotice = 'Invitation saved, but the email could not be delivered because no mail provider is configured.';
+      }
     } catch (emailError) {
       console.warn('Invite email failed:', emailError.message);
+      emailNotice = 'Invitation saved, but the email could not be delivered because no mail provider is configured.';
     }
 
     return res.render('dashboard', {
       title: 'BsmartQ | Dashboard',
       user: req.user,
       error: null,
-      notice: `Invited ${result.user.name} to your workspace. They can sign in immediately. Temporary password: ${result.temporaryPassword}`,
+      notice: emailNotice || `Invited ${result.user.name} to your workspace. They can sign in immediately. Temporary password: ${result.temporaryPassword}`,
       inviteMembers: members,
       plan,
       paymentStatus,

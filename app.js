@@ -7,6 +7,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const querystring = require('querystring');
 const express = require('express');
 const morgan = require('morgan');
@@ -23,11 +24,26 @@ const {
 const { sendSmsNotification } = require('./lib/notifications');
 const dotenv = require('dotenv');
 
-dotenv.config();
-if (process.env.NODE_ENV) {
-  const envPath = path.resolve(process.cwd(), `.env.${process.env.NODE_ENV}`);
-  dotenv.config({ path: envPath });
+function loadEnvFiles() {
+  const envFiles = [path.resolve(process.cwd(), '.env')];
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const targetedEnvFile = path.resolve(process.cwd(), `.env.${nodeEnv}`);
+  if (fs.existsSync(targetedEnvFile)) {
+    envFiles.push(targetedEnvFile);
+  }
+
+  for (const envFile of envFiles) {
+    if (fs.existsSync(envFile)) {
+      dotenv.config({ path: envFile });
+    }
+  }
+
+  if (!process.env.NODE_ENV) {
+    process.env.NODE_ENV = nodeEnv;
+  }
 }
+
+loadEnvFiles();
 const QRCode = require('qrcode');
 let TwilioClient = null;
 if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
@@ -43,10 +59,15 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   console.warn('⚠️ Twilio SMS credentials not configured; SMS notifications will be logged only');
 }
 
-if (process.env.SENDGRID_API_KEY) {
-  console.log('✅ SendGrid API key detected for email delivery');
+const hasSendgridConfig = Boolean(process.env.SENDGRID_API_KEY);
+const hasSmtpConfig = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
+if (hasSendgridConfig) {
+  console.log('✅ SendGrid mail delivery configured');
+} else if (hasSmtpConfig) {
+  console.log('✅ SMTP mail delivery configured');
 } else {
-  console.warn('⚠️ SendGrid API key not configured; email will fall back to SMTP if provided');
+  console.warn('⚠️ No mail provider configured; invite and approval emails will be logged only');
 }
 
 function buildDbConfig() {

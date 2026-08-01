@@ -59,10 +59,13 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   console.warn('⚠️ Twilio SMS credentials not configured; SMS notifications will be logged only');
 }
 
+const hasResendConfig = Boolean(process.env.RESEND_API_KEY);
 const hasSendgridConfig = Boolean(process.env.SENDGRID_API_KEY);
 const hasSmtpConfig = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
-if (hasSendgridConfig) {
+if (hasResendConfig) {
+  console.log('✅ Resend mail delivery configured');
+} else if (hasSendgridConfig) {
   console.log('✅ SendGrid mail delivery configured');
 } else if (hasSmtpConfig) {
   console.log('✅ SMTP mail delivery configured');
@@ -91,6 +94,13 @@ function buildDbConfig() {
 }
 
 const dbPool = new Pool(buildDbConfig());
+
+dbPool.on('error', (error) => {
+  console.warn('⚠️ PostgreSQL pool error detected:', error.message);
+  dbStatus = { connected: false, error: error.message };
+  systemMode = 'OFFLINE';
+  scheduleReconnect();
+});
 
 let dbStatus = { connected: false, error: null };
 
